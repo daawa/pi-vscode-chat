@@ -1,0 +1,147 @@
+{
+  "name": "pi-vscode-chat",
+  "displayName": "Pi Chat",
+  "description": "Chat sidebar powered by your local pi coding agent — Copilot-like, with all pi extensions, skills, multi-agent & OpenCode",
+  "version": "0.2.0",
+  "publisher": "iqbalabiyoga",
+  "license": "MIT",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#4f46e5",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iqbalabiyoga/pi-vscode-chat"
+  },
+  "private": true,
+  "engines": {
+    "vscode": "^1.98.0"
+  },
+  "categories": ["Chat", "Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pi-chat",
+          "title": "Pi Chat",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "pi-chat": [
+        {
+          "type": "webview",
+          "id": "piChat.sidebar",
+          "name": "Chat"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "piChat.sidebar",
+        "contents": "# Pi Chat\nChat sidebar for your local pi coding agent.\n\n[Start session](command:piChat.newSession)\n[Select model](command:piChat.selectModel)\n[Check dependencies](command:piChat.checkDependencies)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "piChat.checkDependencies",
+        "title": "Pi: Check Dependencies"
+      },
+      {
+        "command": "piChat.installDependencies",
+        "title": "Pi: Install Dependencies"
+      },
+      {
+        "command": "piChat.configureProvider",
+        "title": "Pi: Configure AI Provider & Keys"
+      },
+      {
+        "command": "piChat.manageSkills",
+        "title": "Pi: Manage Skills & Extensions"
+      },
+      {
+        "command": "piChat.newSession",
+        "title": "Pi: New Session"
+      },
+      {
+        "command": "piChat.selectModel",
+        "title": "Pi: Select Model"
+      },
+      {
+        "command": "piChat.acceptEdit",
+        "title": "Pi: Accept Edit"
+      },
+      {
+        "command": "piChat.rejectEdit",
+        "title": "Pi: Reject Edit"
+      },
+      {
+        "command": "piChat.abort",
+        "title": "Pi: Abort Current Task"
+      },
+      {
+        "command": "piChat.sendSelection",
+        "title": "Pi Chat: Ask About Selection"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "piChat.sendSelection",
+          "title": "Pi Chat: Ask About Selection",
+          "group": "pi"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Pi Chat",
+      "properties": {
+        "piChat.piPath": {
+          "type": "string",
+          "default": "pi",
+          "description": "Path to pi binary"
+        },
+        "piChat.adapterArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra CLI args passed to pi --mode rpc e.g. ['--provider', 'opencode', '--model', 'opencode-zen']"
+        },
+        "piChat.autoSnapshot": {
+          "type": "boolean",
+          "default": true,
+          "description": "Snapshot files before edit tool runs, enabling accept/revert"
+        },
+        "piChat.extraEnv": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra environment variables passed to pi process (e.g. {\"OPENAI_API_KEY\": \"sk-...\"}). By default only PATH, HOME, USER, TERM are passed for security."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "bun run compile",
+    "compile": "bun run build:vendor && bun run build && tsc -p ./ --noEmit",
+    "watch": "tsc -watch -p ./ --noEmit",
+    "build": "bun build ./src/extension.ts --outdir ./out --target node --external vscode",
+    "build:vendor": "bun build ./media/vendor-entry.js --outfile ./media/vendor.js --format iife --minify"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.98.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "diff2html": "^3.4.56",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.5"
+  }
+}
