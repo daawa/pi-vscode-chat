@@ -37,13 +37,21 @@ export async function activate(context: vscode.ExtensionContext) {
     // Configure AI provider keys — host pi reads ~/.pi/auth.json; guide user to pi CLI
     vscode.commands.registerCommand('piChat.configureProvider', async () => {
       const action = await vscode.window.showInformationMessage(
-        'Pi Chat: provider keys come from your host pi installation (~/.pi/auth.json). Configure them with `pi /login` in the terminal, or edit the file directly.',
+        'Configure provider keys with `pi /login` in the terminal, or edit ~/.pi/auth.json directly.',
         'Open Terminal',
       );
       if (action === 'Open Terminal') {
         const terminal = vscode.window.createTerminal({ name: 'pi' });
         terminal.show();
         terminal.sendText('pi /login');
+        // Prompt reload after terminal opens so pi picks up new auth.json
+        const reload = await vscode.window.showInformationMessage(
+          'Pi Chat: after configuring, reload to pick up new provider.',
+          'Reload Now',
+        );
+        if (reload === 'Reload Now') {
+          vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
       }
     }),
 
