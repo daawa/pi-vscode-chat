@@ -36,22 +36,27 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     // Configure AI provider keys — host pi reads ~/.pi/auth.json; guide user to pi CLI
     vscode.commands.registerCommand('piChat.configureProvider', async () => {
-      const action = await vscode.window.showInformationMessage(
-        'Configure provider keys with `pi /login` in the terminal, or edit ~/.pi/auth.json directly.',
-        'Open Terminal',
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: '$(sign-in) Login', description: 'pi /login — add or switch provider', cmd: 'pi /login' },
+          { label: '$(sign-out) Logout', description: 'pi /logout — remove current provider', cmd: 'pi /logout' },
+          { label: '$(refresh) Reload', description: 'Reload window to sync provider state' },
+        ],
+        { placeHolder: 'Manage provider authentication' },
       );
-      if (action === 'Open Terminal') {
+      if (!pick) return;
+      if (pick.cmd) {
         const terminal = vscode.window.createTerminal({ name: 'pi' });
         terminal.show();
-        terminal.sendText('pi /login');
-        // Prompt reload after terminal opens so pi picks up new auth.json
-        const reload = await vscode.window.showInformationMessage(
-          'Pi Chat: after configuring, reload to pick up new provider.',
-          'Reload Now',
-        );
-        if (reload === 'Reload Now') {
-          vscode.commands.executeCommand('workbench.action.reloadWindow');
-        }
+        terminal.sendText(pick.cmd);
+      }
+      // Prompt reload so pi picks up auth.json changes
+      const reload = await vscode.window.showInformationMessage(
+        'Pi Chat: reload to sync provider state.',
+        'Reload Now',
+      );
+      if (reload === 'Reload Now') {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
       }
     }),
 
