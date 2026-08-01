@@ -103,7 +103,16 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('No models available');
         return;
       }
-      const items = models.map((m: any) => ({
+      // Filter: only show models from authenticated providers
+      const authProviders = getAuthenticatedProviders();
+      const filtered = authProviders.length > 0
+        ? models.filter((m: any) => authProviders.includes(m.provider))
+        : models;
+      if (filtered.length === 0) {
+        vscode.window.showErrorMessage('No models from authenticated providers. Run pi /login.');
+        return;
+      }
+      const items = filtered.map((m: any) => ({
         label: m.name || m.id,
         description: `${m.provider}/${m.id}`,
         provider: m.provider,
@@ -378,6 +387,18 @@ function runInstallInline(): void {
   terminal.sendText('bun add -g @earendil-works/pi-coding-agent');
   terminal.sendText('bun add -g context-mode pi-superpowers pi-subagents pi-agents-team pi-caveman pi-web-access pi-mcp-adapter 2>/dev/null; echo "Skills installed (some may not be found — that\'s fine)"');
   terminal.sendText('echo "---"; echo "Pi Chat install complete. Reload VS Code window."');
+}
+
+/** Read ~/.pi/agent/auth.json and return list of authenticated provider names */
+function getAuthenticatedProviders(): string[] {
+  try {
+    const authPath = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
+    const raw = fs.readFileSync(authPath, 'utf-8');
+    const auth = JSON.parse(raw);
+    return Object.keys(auth);
+  } catch {
+    return [];
+  }
 }
 
 function findPiPath(piPath: string): string {

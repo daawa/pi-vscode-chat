@@ -302,7 +302,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const items = models.map((m: any) => ({
+    // Filter models: only show those from authenticated providers
+    const authProviders = this.getAuthenticatedProviders();
+    const filtered = authProviders.length > 0
+      ? models.filter((m: any) => authProviders.includes(m.provider))
+      : models; // if auth.json missing or empty, show all (fallback)
+
+    if (filtered.length === 0) {
+      vscode.window.showErrorMessage('No models from authenticated providers. Run pi /login to add a provider.');
+      return;
+    }
+
+    const items = filtered.map((m: any) => ({
       label: m.name || m.id,
       description: `${m.provider}/${m.id}`,
       detail: [
@@ -546,6 +557,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       type: 'editsSummary',
       pending: this.edits.getPendingEdits().map(e => ({ editId: e.id, filePath: e.filePath })),
     });
+  }
+
+  // ── Auth ──
+
+  /** Read ~/.pi/agent/auth.json and return list of authenticated provider names */
+  private getAuthenticatedProviders(): string[] {
+    try {
+      const authPath = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
+      const raw = fs.readFileSync(authPath, 'utf-8');
+      const auth = JSON.parse(raw);
+      return Object.keys(auth);
+    } catch {
+      return []; // auth.json missing or unreadable — show all models as fallback
+    }
   }
 
   // ── State ──
