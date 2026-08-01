@@ -12,3 +12,4 @@ out/**/*.map
 **/*.vsix
 dist/**
 node_modules/**
+__tests__/**

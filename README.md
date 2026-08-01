@@ -196,7 +196,6 @@ bun run compile                # Full build: vendor + extension + type check
 bun run build                  # Extension bundle only (fast iteration)
 bun run build:vendor           # Vendor bundle only (marked + hljs)
 bun run watch                  # tsc -watch for type checking only
-bun run screenshots            # Regenerate documentation screenshots (Playwright)
 ```
 
 Press **F5** to launch the Extension Development Host (`.vscode/launch.json` runs `npm: compile` first).
@@ -215,10 +214,6 @@ media/
 ├── style.css                 # Theme-native styles (--vscode-* tokens)
 ├── vendor-entry.js           # Entry point for vendor bundle
 ├── vendor.js                 # Bundled marked + highlight.js (built)
-__tests__/
-└── screenshots/
-    ├── capture.ts            # Playwright screenshot harness
-    └── *.png                 # Generated screenshots
 ```
 
 ### READ THIS
@@ -227,7 +222,6 @@ __tests__/
 - All message shapes across all three boundaries (RPC ↔ extension host ↔ webview) are defined in `src/types.ts` — single source of truth.
 - The webview has zero npm dependencies at runtime — all JS ships with the extension. No CDN. Strict CSP.
 - Colors come from `--vscode-*` CSS variables. No hard-coded palette.
-- Screenshots are regenerated via `bun run screenshots` (Playwright + Chromium, `__tests__/screenshots/capture.ts`).
 
 ---
 
