@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 (2026-08-03)
+
+### Docs
+
+- Playwright screenshot harness: 8 automated screenshots (welcome, chat, tools, thinking, edits, workflow, slash commands, model picker)
+- README rewritten: Marketplace badges, installation guide, screenshot gallery, development docs
+- Repository migrated to `iqbalabiyoga/pi-vscode-chat`
+
 ## 0.2.1 (2026-08-02)
 
 ### Fixes
