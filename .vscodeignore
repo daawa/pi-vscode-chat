@@ -3,7 +3,7 @@
 .gitignore
 .git/**
 src/**
-docs/**
+docs/plans/**
 tsconfig.json
 bun.lock
 CLAUDE.md

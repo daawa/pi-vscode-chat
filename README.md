@@ -1,8 +1,54 @@
 # Pi Chat for VS Code
 
+[![Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/iqbalabiyoga.pi-vscode-chat?label=Marketplace&color=007acc)](https://marketplace.visualstudio.com/items?itemName=iqbalabiyoga.pi-vscode-chat)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.98.0-007acc?logo=visual-studio-code)](https://code.visualstudio.com/)
+
 **Pi Chat** brings your local [pi coding agent](https://github.com/badlogic/pi-mono) into VS Code as a Copilot-style chat sidebar — with **all** pi extensions, skills, providers and multi-agent tooling working out of the box.
 
 > ⚡ The extension is a **UI + RPC bridge layer** — it spawns the `pi` binary installed on your host (`pi --mode rpc`) and talks JSONL over stdin/stdout. It embeds no agent SDK; everything configured in `~/.pi/` (extensions, skills, multi-agent teams, providers) works automatically.
+
+---
+
+## Installation
+
+### From Marketplace (recommended)
+
+1. Open VS Code → **Extensions** (`Cmd+Shift+X`)
+2. Search for **"Pi Chat"**
+3. Click **Install**
+
+Or install via command line:
+
+```bash
+code --install-extension iqbalabiyoga.pi-vscode-chat
+```
+
+### From VSIX
+
+1. Download the latest `.vsix` from [Releases](https://github.com/iqbalabiyoga/pi-vscode-chat/releases)
+2. Install: `code --install-extension pi-vscode-chat-<version>.vsix`
+
+### Prerequisites
+
+- **pi CLI** — the extension requires the `pi` coding agent on your `PATH`. No pi? Run **`Pi: Install Dependencies`** from the Command Palette — a wizard checks your environment and installs bun + pi + recommended skills.
+- **AI Provider Key** — set once with `pi /login` in any terminal (or edit `~/.pi/auth.json` directly).
+
+---
+
+## Screenshots
+
+| Welcome | Chat with Code | Tool Usage |
+|:---:|:---:|:---:|
+| ![Welcome](docs/screenshots/01-welcome.png) | ![Chat](docs/screenshots/02-simple-chat.png) | ![Tools](docs/screenshots/03-tool-usage.png) |
+
+| Thinking Blocks | Edit Tracking | Slash Commands |
+|:---:|:---:|:---:|
+| ![Thinking](docs/screenshots/04-thinking-block.png) | ![Edits](docs/screenshots/05-edit-tracking.png) | ![Commands](docs/screenshots/07-slash-commands.png) |
+
+| Full Workflow | Model Switcher |
+|:---:|:---:|
+| ![Workflow](docs/screenshots/06-full-workflow.png) | ![Models](docs/screenshots/08-model-switcher.png) |
 
 ---
 
@@ -23,18 +69,6 @@
 - **Extension status chips** — pi extensions surface as interactive chips: toggle rtk on/off, change caveman compression level, open the agents-team panel (Init / Result / Stop).
 - **Attachments** — VS Code file picker, image paste from clipboard, drag & drop from Explorer or Finder.
 - **Theme-native UI** — every color derives from VS Code theme tokens. Light, dark, and high-contrast all work. No CDN assets. Strict Content Security Policy.
-
----
-
-## Requirements & Credentials
-
-### Dependency: the pi CLI
-Pi Chat requires the `pi` coding agent CLI on your `PATH` (e.g. `~/.bun/bin/pi`). The extension spawns your host `pi --mode rpc`, so all your `~/.pi/` extensions, skills and multi-agent teams work exactly as in the terminal.
-
-No pi installed? Run **`Pi: Install Dependencies`** (Command Palette or sidebar) — a wizard checks your environment and installs bun + pi + recommended skills. `Pi: Check Dependencies` shows a detailed status report.
-
-### AI Provider Keys
-Provider keys come from your host pi installation (`~/.pi/auth.json`) — set them once with `pi /login` in any terminal (or edit the file directly). Pi Chat passes them through unchanged.
 
 ---
 
@@ -82,7 +116,7 @@ Webview (sidebar UI)                  AI provider
 Everything you type, attach, or that pi reads during execution is sent through pi to whichever AI provider you've configured:
 
 - **Chat messages** — your prompts, questions, code requests
-- **Attached files** — files selected via file picker, or dropped/ pasted into the chat
+- **Attached files** — files selected via file picker, or dropped/pasted into the chat
 - **Source code** — pi's `read`, `grep`, `find`, `ls` tools read workspace files. pi passes relevant excerpts to the AI provider
 - **Images** — pasted from clipboard or dropped into the webview (converted to base64)
 - **Workspace structure** — file paths, directory names, project scaffolding
@@ -92,12 +126,6 @@ Everything you type, attach, or that pi reads during execution is sent through p
 - **Edit snapshots** — file snapshots for accept/revert are stored in extension memory only
 - **Session list** — session files are read from `~/.pi/agent/sessions/*.jsonl` and their titles displayed; the raw session files are never sent externally
 - **VS Code state** — the webview's rendered message HTML is persisted via `vscode.setState()` (VS Code's Extension Storage); this stays on disk locally unless you use Settings Sync
-
-### Disk storage
-
-- **Session files** (`~/.pi/agent/sessions/--<workspace>--/*.jsonl`) contain full conversation history in plaintext JSONL. Anyone with filesystem access can read them
-- **VS Code Extension Storage** persists the last rendered chat UI state; this is local unless VS Code Settings Sync is enabled
-- No telemetry, no analytics, no usage reporting
 
 ### Security recommendations
 
@@ -168,6 +196,7 @@ bun run compile                # Full build: vendor + extension + type check
 bun run build                  # Extension bundle only (fast iteration)
 bun run build:vendor           # Vendor bundle only (marked + hljs)
 bun run watch                  # tsc -watch for type checking only
+bun run screenshots            # Regenerate documentation screenshots (Playwright)
 ```
 
 Press **F5** to launch the Extension Development Host (`.vscode/launch.json` runs `npm: compile` first).
@@ -186,6 +215,10 @@ media/
 ├── style.css                 # Theme-native styles (--vscode-* tokens)
 ├── vendor-entry.js           # Entry point for vendor bundle
 ├── vendor.js                 # Bundled marked + highlight.js (built)
+__tests__/
+└── screenshots/
+    ├── capture.ts            # Playwright screenshot harness
+    └── *.png                 # Generated screenshots
 ```
 
 ### READ THIS
@@ -194,6 +227,7 @@ media/
 - All message shapes across all three boundaries (RPC ↔ extension host ↔ webview) are defined in `src/types.ts` — single source of truth.
 - The webview has zero npm dependencies at runtime — all JS ships with the extension. No CDN. Strict CSP.
 - Colors come from `--vscode-*` CSS variables. No hard-coded palette.
+- Screenshots are regenerated via `bun run screenshots` (Playwright + Chromium, `__tests__/screenshots/capture.ts`).
 
 ---
 
@@ -218,96 +252,15 @@ MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
-## Publishing Lifecycle
-
-### Prerequisites
-
-1. **Install `@vscode/vsce`** — the VS Code Extension Manager CLI:
-
-   ```bash
-   bun add -g @vscode/vsce
-   ```
-
-2. **Create a publisher** on the [Visual Studio Marketplace management page](https://marketplace.visualstudio.com/manage).
-
-3. **Get a Personal Access Token (PAT)** from Azure DevOps (`Marketplace` → `Manage` → `Personal Access Tokens`). Scope: `Marketplace (publish)`.
-
-4. **Verify publisher**:
-
-   ```bash
-   vsce login <your-publisher-id>
-   # paste your PAT when prompted
-   ```
-
-### Packaging
+## Publishing
 
 ```bash
-bun run compile              # full build first
-vsce package --no-dependencies
-# Produces: pi-vscode-chat-<version>.vsix
+bun run compile                    # full build
+vsce publish --no-dependencies     # publishes to Marketplace
 ```
 
-Check the package contents:
-
-```bash
-vsce ls
-```
-
-### Publishing
-
-```bash
-# First-time publish
-vsce publish --no-dependencies
-```
-
-### Version updates
-
-`vsce` auto-increments the version for you:
-
-```bash
-vsce publish patch           # 0.2.0 → 0.2.1
-vsce publish minor           # 0.2.0 → 0.3.0
-vsce publish major           # 0.2.0 → 1.0.0
-vsce publish 0.5.0           # explicit version
-```
-
-Each command:
-
-1. Bumps the `version` field in `package.json`
-2. Creates a git commit + tag (format: `v<version>`)
-3. Builds and uploads the `.vsix` to Marketplace
-
-Use `-m "custom message %s"` to override the commit message (where `%s` is the version).
-
-### Pre-release versions
-
-```bash
-vsce publish --pre-release patch
-```
-
-Best practice: use even minor for release (`0.2.x`), odd minor for pre-release (`0.3.x`). Only `major.minor.patch` is supported — no semver pre-release tags.
-
-### After publishing
-
-- Extension appears on [Marketplace](https://marketplace.visualstudio.com/items?itemName=<publisher-id>.pi-vscode-chat) within minutes
-- Users install directly from VS Code Extensions view (`Cmd+Shift+X`)
-- Updates are delivered automatically (VS Code checks periodically)
-
-### CI/CD automation
-
-For automated publishing (GitHub Actions, etc.), Microsoft recommends [workload identity federation](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace) instead of long-lived PATs.
-
-### Required files for Marketplace
-
-| File | Status | Purpose |
-|---|---|---|
-| `README.md` | ✅ Done | Extension description page |
-| `LICENSE` | ✅ Done | License info (MIT) |
-| `CHANGELOG.md` | ✅ Done | Version history |
-| `icon.png` (≥128×128) | ✅ Done | Extension icon |
-| `package.json#galleryBanner` | ✅ Done | Banner color (`#4f46e5`) |
-| `package.json#icon` | ✅ Done | Path to icon |
+See [EXTENSION.md](EXTENSION.md) for the full publishing lifecycle, version management, and CI/CD setup.
 
 ---
 
-*Built with pi — the open-source coding agent for your terminal, now in your editor.*
+*Built with [pi](https://github.com/badlogic/pi-mono) — the open-source coding agent for your terminal, now in your editor.*

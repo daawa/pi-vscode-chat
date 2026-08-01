@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 (2026-08-02)
+
+### Fixes
+
+- **Provider auth sync**: window reload after `pi /login` so provider list refreshes.
+- **Provider toggle**: login/logout + reload QuickPick after auth changes.
+- **Model filtering**: only show models from authenticated providers (from `auth.json`).
+
 ## 0.2.0 (2026-07-08)
 
 ### Major
