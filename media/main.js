@@ -85,10 +85,9 @@
     return text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
   }
 
+  const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text ?? '';
-    return div.innerHTML;
+    return String(text ?? '').replace(/[&<>"']/g, c => ESC_MAP[c]);
   }
 
   function createElement(tag, className, html) {
@@ -107,17 +106,40 @@
     requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
   }
 
-  function renderMarkdown(container, text) {
+  // ── Streaming render throttle ──
+  let _renderPending = null;
+  let _renderScheduled = false;
+  function throttledRender(container, text) {
+    _renderPending = { container, text };
+    if (!_renderScheduled) {
+      _renderScheduled = true;
+      requestAnimationFrame(() => {
+        _renderScheduled = false;
+        const p = _renderPending;
+        if (p) { _renderPending = null; renderMarkdown(p.container, p.text, true); }
+      });
+    }
+  }
+  function flushRender() {
+    _renderScheduled = false;
+    const p = _renderPending;
+    if (p) { _renderPending = null; renderMarkdown(p.container, p.text, false); }
+  }
+
+  function renderMarkdown(container, text, streaming) {
     try {
       container.innerHTML = window.marked ? window.marked.parse(text) : escapeHtml(text);
     } catch {
       container.textContent = text;
     }
-    container.querySelectorAll('pre code').forEach((block) => {
-      if (window.hljs && !block.dataset.hl) {
-        try { window.hljs.highlightElement(block); block.dataset.hl = '1'; } catch {}
-      }
-    });
+    // Skip expensive syntax highlighting during streaming — full highlight on agentEnd
+    if (!streaming) {
+      container.querySelectorAll('pre code').forEach((block) => {
+        if (window.hljs && !block.dataset.hl) {
+          try { window.hljs.highlightElement(block); block.dataset.hl = '1'; } catch {}
+        }
+      });
+    }
     container.querySelectorAll('pre').forEach((pre) => {
       if (pre.querySelector('.code-copy')) return;
       const btn = createElement('button', 'code-copy', ICONS.copy);
@@ -128,6 +150,15 @@
         setTimeout(() => { btn.innerHTML = ICONS.copy; }, 1200);
       });
       pre.appendChild(btn);
+    });
+  }
+  // Full highlight pass — called on agentEnd to highlight all code blocks
+  function highlightAll(container) {
+    if (!window.hljs) return;
+    container.querySelectorAll('pre code').forEach((block) => {
+      if (!block.dataset.hl) {
+        try { window.hljs.highlightElement(block); block.dataset.hl = '1'; } catch {}
+      }
     });
   }
 
@@ -202,14 +233,19 @@
     saveState();
   }
 
+  let _saveTimer = null;
   function saveState() {
-    state.messages = [];
-    messagesEl.querySelectorAll('.message').forEach(el => {
-      const role = el.classList.contains('user') ? 'user' : 'assistant';
-      const contentEl = el.querySelector('.message-content');
-      if (contentEl) state.messages.push({ role, html: contentEl.innerHTML });
-    });
-    vscode.setState(state);
+    if (_saveTimer) return; // debounce — skip if already pending
+    _saveTimer = setTimeout(() => {
+      _saveTimer = null;
+      state.messages = [];
+      messagesEl.querySelectorAll('.message').forEach(el => {
+        const role = el.classList.contains('user') ? 'user' : 'assistant';
+        const contentEl = el.querySelector('.message-content');
+        if (contentEl) state.messages.push({ role, html: contentEl.innerHTML });
+      });
+      vscode.setState(state);
+    }, 100);
   }
 
   function restoreState() {
@@ -1042,7 +1078,7 @@
           contentEl.appendChild(textEl);
         }
         state.accumulatedText += msg.delta;
-        renderMarkdown(textEl, state.accumulatedText);
+        throttledRender(textEl, state.accumulatedText);
         textEl.classList.add('live');
         scrollToBottom();
         break;
@@ -1104,7 +1140,12 @@
 
       case 'agentEnd': {
         updateStreamingState(false);
-        document.querySelectorAll('.streaming-text.live').forEach(el => el.classList.remove('live'));
+        flushRender(); // flush any pending throttled render
+        // Full syntax highlight pass on all streaming text blocks
+        document.querySelectorAll('.streaming-text').forEach(el => {
+          el.classList.remove('live');
+          highlightAll(el);
+        });
         // Settle any still-running tool cards (aborted)
         document.querySelectorAll('.tool-card.running').forEach(card => {
           card.classList.remove('running');
