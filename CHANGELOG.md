@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3 (2026-08-03)
+
+### Performance
+
+- **Typing lag fix**: removed forced layout reflow on every keystroke (CSS `field-sizing: content` replaces JS height calc)
+- **Autocomplete IPC gated**: only sends search to extension host when cursor is near `@` or `/` (was every keystroke)
+- **Streaming throttle**: textDelta renders via rAF instead of O(n²) re-render per character
+- **hljs skip during streaming**: syntax highlighting deferred to agentEnd (saves ~200ms per delta)
+- **saveState debounced**: DOM serialization batched at 100ms
+- **escapeHtml optimized**: pure string replace instead of temp DOM element
+- **Vendor bundle trimmed**: hljs reduced from 254KB to 189KB (20 essential languages)
+
 ## 0.2.2 (2026-08-03)
 
 ### Docs
