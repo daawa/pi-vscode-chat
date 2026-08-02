@@ -741,6 +741,8 @@ pre:hover .code-copy { opacity: 1; }
   max-height: 160px;
   outline: none;
   width: 100%;
+  field-sizing: content;
+  overflow-y: auto;
 }
 #input::placeholder { color: var(--vscode-input-placeholderForeground, var(--text-dim)); }
 

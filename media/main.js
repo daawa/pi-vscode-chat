@@ -1253,13 +1253,25 @@
   // ── Input events ──
 
   inputEl.addEventListener('input', () => {
-    inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
-    sendBtn.disabled = !inputEl.value.trim();
-    if (state.isStreaming) {
-      sendBtn.classList.toggle('hidden', !inputEl.value.trim());
+    // Auto-resize: only recalc when value changed (avoids forced reflow every keystroke)
+    const v = inputEl.value;
+    if (inputEl._lastLen !== v.length) {
+      inputEl._lastLen = v.length;
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
     }
-    checkAutocomplete();
+    sendBtn.disabled = !v.trim();
+    if (state.isStreaming) {
+      sendBtn.classList.toggle('hidden', !v.trim());
+    }
+    // Only check autocomplete when cursor is near @ or / (avoids IPC on every keystroke)
+    const cursor = inputEl.selectionStart;
+    const ch = v[cursor - 1] || '';
+    if (ch === '@' || ch === '/' || (autocompleteEl && !autocompleteEl.classList.contains('hidden'))) {
+      checkAutocomplete();
+    } else if (autocompleteEl && !autocompleteEl.classList.contains('hidden')) {
+      hideAutocomplete();
+    }
   });
 
   inputEl.addEventListener('keydown', (e) => {
