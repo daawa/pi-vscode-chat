@@ -136,7 +136,7 @@
     "vscode:prepublish": "bun run compile",
     "compile": "bun run build:vendor && bun run build && tsc -p ./ --noEmit",
     "watch": "tsc -watch -p ./ --noEmit",
-    "build": "bun build ./src/extension.ts --outdir ./out --target node --external vscode",
+    "build": "bun build ./src/extension.ts --outdir ./out --target node --external vscode --sourcemap=linked",
     "build:vendor": "bun build ./media/vendor-entry.js --outfile ./media/vendor.js --format iife --minify",
     "screenshots": "bun run __tests__/screenshots/capture.ts"
   },
