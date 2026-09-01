@@ -3,6 +3,7 @@
   "displayName": "Pi Chat",
   "description": "Chat sidebar powered by your local pi coding agent — Copilot-like, with all pi extensions, skills, multi-agent & OpenCode",
   "version": "0.2.3",
+  "type": "module",
   "publisher": "iqbalabiyoga",
   "license": "MIT",
   "icon": "icon.png",
@@ -136,7 +137,7 @@
     "vscode:prepublish": "bun run compile",
     "compile": "bun run build:vendor && bun run build && tsc -p ./ --noEmit",
     "watch": "tsc -watch -p ./ --noEmit",
-    "build": "bun build ./src/extension.ts --outdir ./out --target node --external vscode --sourcemap=linked",
+    "build": "bun build ./src/extension.ts --outdir ./out --target node --format esm --external vscode --sourcemap=linked",
     "build:vendor": "bun build ./media/vendor-entry.js --outfile ./media/vendor.js --format iife --minify",
     "screenshots": "bun run __tests__/screenshots/capture.ts"
   },
