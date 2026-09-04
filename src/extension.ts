@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
+import * as console from 'console';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as cp from 'child_process';
-import { PiRpcClient } from './piRpcClient';
-import { ChatSidebarProvider } from './chatSidebarProvider';
-import { EditManager } from './editManager';
+import { PiRpcClient } from './piRpcClient.ts';
+import { ChatSidebarProvider } from './chatSidebarProvider.ts';
+import { EditManager } from './editManager.ts';
 let piClient: PiRpcClient | undefined;
 let editManager: EditManager | undefined;
 let sidebarProvider: ChatSidebarProvider | undefined;

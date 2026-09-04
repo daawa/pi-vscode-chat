@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { EditRecord } from './types';
+import type { EditRecord } from './types.js';
 
 /**
  * Manages file snapshots and edit tracking for accept/revert.

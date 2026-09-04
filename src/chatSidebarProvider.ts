@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { PiRpcClient } from './piRpcClient';
-import { EditManager } from './editManager';
-import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord } from './types';
+import { PiRpcClient } from './piRpcClient.ts';
+import { EditManager } from './editManager.ts';
+import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord } from './types.ts';
 
 /**
  * WebviewViewProvider for the Pi Chat sidebar.
