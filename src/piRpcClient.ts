@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { StringDecoder } from 'string_decoder';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import type { RpcCommand, RpcResponse, RpcEvent, ExtensionUiRequest, PiCommandInfo, SessionStats } from './types';
+import type { RpcCommand, RpcResponse, RpcEvent, ExtensionUiRequest, PiCommandInfo, SessionStats } from './types.js';
 
 /**
  * Manages a pi --mode rpc child process.
