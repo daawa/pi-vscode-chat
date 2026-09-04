@@ -197,6 +197,8 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBar.text = '$(comment-discussion) Pi';
   statusBar.tooltip = 'Open Pi Chat';
   statusBar.command = 'workbench.view.extension.pi-chat';
+  // DeepSeek brand blue
+  statusBar.color = '#4D6BFE';
   statusBar.show();
   context.subscriptions.push(statusBar);
 }
