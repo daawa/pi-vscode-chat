@@ -162,7 +162,7 @@ export type WebviewMessage =
   | { type: 'revertAllEdits' }
   | { type: 'acceptAllEdits' }
   | { type: 'showDiff'; editId: string }
-  | { type: 'openFile'; path: string }
+  | { type: 'openFile'; path: string; line?: number; column?: number }
   | { type: 'selectModel' }
   | { type: 'configureProvider' }
   | { type: 'setThinkingLevel'; level: string }

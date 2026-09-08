@@ -97,6 +97,75 @@
     return el;
   }
 
+  // ── File reference linkification ──
+  // Turns inline code like `src/foo.ts:12`, `src/foo.ts:12-34`, `package.json`
+  // or `/abs/path/README.md` into a clickable chip that opens the file in VS Code.
+  const FILE_REF_RE = /^(.+?):(\d+)(?:-(\d+))?$/;
+
+  // Known file extensions for bare filenames (no path separator) such as
+  // `package.json`. This avoids treating stuff like `example.com` as a path.
+  const FILE_EXT_RE = /\.(?:[jt]sx?|jsx|mjs|cjs|json|jsonc|md|mdx|txt|py|rb|go|rs|java|kt|c|h|cpp|hpp|cc|cs|php|swift|sh|bash|zsh|yml|yaml|toml|ini|cfg|conf|env|css|scss|sass|less|html|htm|vue|svelte|sql|graphql|gql|prisma|lock|xml|svg|png|jpe?g|gif|webp|ico)$/i;
+
+  function looksLikePath(p) {
+    if (!p || /:\/\//.test(p)) return false; // skip URLs
+    if (/[\/\\]/.test(p)) return true;       // has a path separator
+    return FILE_EXT_RE.test(p);               // bare filename with a known extension
+  }
+
+  function fileRefParts(text) {
+    if (!text || text.length > 512) return null;
+    const s = text.trim();
+    // path:line or path:line-endline
+    const m = FILE_REF_RE.exec(s);
+    if (m) {
+      const p = m[1].trim();
+      if (!looksLikePath(p)) return null;
+      return { filePath: p, line: parseInt(m[2], 10), endLine: m[3] ? parseInt(m[3], 10) : undefined };
+    }
+    // plain path without a line number
+    if (looksLikePath(s)) return { filePath: s, line: undefined, endLine: undefined };
+    return null;
+  }
+
+  function makeFileRef(text) {
+    const parts = fileRefParts(text);
+    if (!parts) return null;
+    const { filePath } = parts;
+    const line = parts.line;
+    const endLine = parts.endLine;
+
+    const a = document.createElement('a');
+    a.className = 'file-ref';
+    a.href = '#';
+    a.dataset.filePath = filePath;
+    if (line) a.dataset.line = String(line);
+    if (endLine) a.dataset.endLine = String(endLine);
+    a.dataset.fileLinked = '1';
+    a.title = `Open ${filePath}${line ? ':' + line + (endLine ? '-' + endLine : '') : ''}`;
+    a.innerHTML = `${ICONS.file}<span class="file-ref-name">${escapeHtml(filePath)}</span>${line ? `<span class="file-ref-line">:${line}${endLine ? '-' + endLine : ''}</span>` : ''}`;
+    return a;
+  }
+
+  function linkifyFileRefs(root) {
+    // Inline code such as `src/foo.ts:12`
+    root.querySelectorAll('code').forEach((code) => {
+      if (code.closest('pre')) return; // handled below for single-line blocks
+      const a = makeFileRef(code.textContent);
+      if (a) code.replaceWith(a);
+    });
+
+    // Single-line fenced code blocks that are just a file reference
+    root.querySelectorAll('pre > code').forEach((code) => {
+      const text = code.textContent.trim();
+      if (!text || text.includes('\n')) return;
+      const a = makeFileRef(text);
+      if (a) {
+        const pre = code.closest('pre');
+        if (pre) pre.replaceWith(a);
+      }
+    });
+  }
+
   let autoScroll = true;
   messagesEl.addEventListener('scroll', () => {
     autoScroll = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60;
@@ -151,6 +220,7 @@
       });
       pre.appendChild(btn);
     });
+    linkifyFileRefs(container);
   }
   // Full highlight pass — called on agentEnd to highlight all code blocks
   function highlightAll(container) {
@@ -497,11 +567,28 @@
 
   // Event delegation for all data-action buttons (CSP-safe)
   document.addEventListener('click', (e) => {
+    // Clickable file reference (e.g. src/foo.ts:12)
+    const fileRef = e.target.closest('.file-ref');
+    if (fileRef) {
+      e.preventDefault();
+      vscode.postMessage({
+        type: 'openFile',
+        path: fileRef.dataset.filePath,
+        line: fileRef.dataset.line ? parseInt(fileRef.dataset.line, 10) : undefined,
+        column: fileRef.dataset.column ? parseInt(fileRef.dataset.column, 10) : undefined,
+      });
+      return;
+    }
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
     if (action === 'openFile') {
-      vscode.postMessage({ type: 'openFile', path: btn.dataset.path });
+      vscode.postMessage({
+        type: 'openFile',
+        path: btn.dataset.path,
+        line: btn.dataset.line ? parseInt(btn.dataset.line, 10) : undefined,
+        column: btn.dataset.column ? parseInt(btn.dataset.column, 10) : undefined,
+      });
     } else if (action === 'acceptAllEdits' || action === 'revertAllEdits') {
       vscode.postMessage({ type: action });
     } else if (btn.dataset.edit) {
