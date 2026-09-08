@@ -1,6 +1,7 @@
-/* ── Pi Chat — Copilot-grade sidebar UI ──
-   Every color derives from VS Code theme tokens so light/dark/high-contrast
-   themes all work without any hard-coded palette. */
+/* ── Pi Chat — Custom theme ──
+   Light green background for successful tool messages,
+   light red background for failed tool messages,
+   light blue background for code blocks. */
 
 :root {
   --bg: var(--vscode-sideBar-background);
@@ -18,7 +19,11 @@
   --warning: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
   --hover: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
   --card-bg: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.06));
-  --code-bg: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  /* Custom theme: light blue code background */
+  --code-bg: #e3f0fb;
+  /* Custom theme: light green / light red tool message backgrounds */
+  --tool-success-bg: #e6f4ea;
+  --tool-error-bg: #fdecea;
   --font: var(--vscode-font-family);
   --font-mono: var(--vscode-editor-font-family, monospace);
   --radius: 6px;
@@ -339,6 +344,10 @@ pre:hover .code-copy { opacity: 1; }
 .tool-status { display: flex; align-items: center; flex-shrink: 0; width: 13px; }
 .tool-card.done .tool-status { color: var(--success); }
 .tool-card.error .tool-status { color: var(--error); }
+
+/* Custom theme: tinted backgrounds for tool results */
+.tool-card.done { background: var(--tool-success-bg); }
+.tool-card.error { background: var(--tool-error-bg); }
 
 .tool-icon { display: flex; align-items: center; color: var(--text-dim); flex-shrink: 0; }
 .tool-name { font-weight: 600; flex-shrink: 0; }
