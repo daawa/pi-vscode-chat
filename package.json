@@ -102,6 +102,14 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "piChat.sendSelection",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "editorHasSelection"
+      }
+    ],
     "configuration": {
       "title": "Pi Chat",
       "properties": {
