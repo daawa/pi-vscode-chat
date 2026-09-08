@@ -102,8 +102,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'openFile': {
         try {
-          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(msg.path));
-          await vscode.window.showTextDocument(doc, { preview: true });
+          // Resolve relative paths against the workspace root, keep absolute paths as-is
+          let filePath = msg.path;
+          if (!path.isAbsolute(filePath)) {
+            const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot) break;
+            filePath = path.join(wsRoot, filePath);
+          }
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+          const options: vscode.TextDocumentShowOptions = { preview: true };
+          if (msg.line) {
+            const line = Math.max(0, msg.line - 1);
+            const column = msg.column ? Math.max(0, msg.column - 1) : 0;
+            options.selection = new vscode.Range(line, column, line, column);
+          }
+          await vscode.window.showTextDocument(doc, options);
         } catch { /* ignore */ }
         break;
       }
