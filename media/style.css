@@ -84,6 +84,12 @@ button { font-family: var(--font); }
   font-weight: 600;
   user-select: text;
 }
+#session-id {
+  color: var(--text-dim);
+  opacity: 0.6;
+  flex-shrink: 0;
+  user-select: text;
+}
 
 /* ══ Messages ══ */
 

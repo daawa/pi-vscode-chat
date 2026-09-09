@@ -735,6 +735,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     <div id="session-header" class="hidden" role="status" aria-live="polite">
       <span class="session-label">Session</span>
       <span id="session-name"></span>
+      <span id="session-id" class="hidden"></span>
     </div>
     <div id="sessions-panel" class="hidden">
       <div id="sessions-panel-header">
