@@ -344,6 +344,9 @@ pre:hover .code-copy { opacity: 1; }
 .tool-status { display: flex; align-items: center; flex-shrink: 0; width: 13px; }
 .tool-card.done .tool-status { color: var(--success); }
 .tool-card.error .tool-status { color: var(--error); }
+.tool-card.interrupted .tool-status { color: var(--warning); }
+.tool-card.unknown .tool-status { color: var(--text-dim); }
+.tool-card.interrupted { border-color: var(--warning); }
 
 /* Custom theme: tinted backgrounds for tool results */
 .tool-card.done { background: var(--tool-success-bg); }

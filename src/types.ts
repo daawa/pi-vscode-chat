@@ -190,7 +190,8 @@ export type WebviewOutMessage =
   | { type: 'thinkingEnd'; messageId: string; blockIndex: number; content: string }
   | { type: 'toolStart'; messageId: string; toolCallId: string; toolName: string; args: string }
   | { type: 'toolUpdate'; toolCallId: string; output: string }
-  | { type: 'toolEnd'; messageId: string; toolCallId: string; toolName: string; isError: boolean; diff?: string; output?: string; fileContent?: string; filePath?: string }
+  | { type: 'toolEnd'; messageId: string; toolCallId: string; toolName: string; isError: boolean; output?: string }
+  | { type: 'toolDiff'; toolCallId: string; diff: string; filePath: string; fileContent?: string }
   | { type: 'userMessage'; text: string; files?: string[]; queued?: boolean }
   | { type: 'fileResults'; query: string; results: { label: string; path: string }[] }
   | { type: 'setInputText'; text: string; append?: boolean }
