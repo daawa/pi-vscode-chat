@@ -18,6 +18,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private historyRequestId = 0;
   private historyLoading = true;
   private diffContentProvider = new PiOriginalContentProvider();
+  private toolCalls = new Map<string, { args: Record<string, any>; snapshot?: Promise<unknown> }>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -27,6 +28,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   ) {
     this.pi.on('event', this.onPiEvent.bind(this));
     this.pi.on('exit', (code: number | null, signal: string | null, stderr?: string) => {
+      this.toolCalls.clear();
       this.setStreaming(false);
       this.postMessage({ type: 'agentEnd' });
       const detail = stderr ? `: ${stderr}` : '';
@@ -74,6 +76,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     try {
       await this.pi.newSession();
       this.edits.clear();
+      this.toolCalls.clear();
       this.postMessage({ type: 'sessionCleared' });
       this.sendState();
       this.sendStats();
@@ -85,7 +88,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // ── Webview Message Handler ──
 
   private async handleWebviewMessage(msg: WebviewMessage): Promise<void> {
-    // The webview also gates submission, but queued IPC must not bypass hydration.
+    // The webview also gates submission, but queued IPC must not bypass session history loading.
     if (this.historyLoading && (msg.type === 'prompt' || msg.type === 'runCommand')) return;
     switch (msg.type) {
       case 'prompt':
@@ -258,6 +261,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
       this.edits.clear();
       // Load history through RPC (respects branches/compaction)
+      this.toolCalls.clear();
       await this.loadHistory();
       this.sendState();
       this.sendStats();
@@ -494,6 +498,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private handleToolStart(event: any): void {
+    const args = event.args ?? {};
+    const filePath = args.path || args.file_path || args.filePath;
+    const call: { args: Record<string, any>; snapshot?: Promise<unknown> } = { args };
+    if (['edit', 'write', 'multi-edit'].includes(event.toolName) && filePath) {
+      const absPath = path.resolve(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', filePath);
+      call.snapshot = this.edits.snapshotFile(absPath).catch(err => {
+        console.warn('[pi] could not snapshot edit:', err);
+      });
+    }
+    this.toolCalls.set(event.toolCallId, call);
     this.postMessage({
       type: 'toolStart',
       messageId: 'current',
@@ -504,6 +518,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleToolEnd(event: any): Promise<void> {
+    // Pi only supplies args on start/update, not tool_execution_end.
+    const call = this.toolCalls.get(event.toolCallId);
+    this.toolCalls.delete(event.toolCallId);
     const outputText = (event.result?.content || [])
       .map((c: any) => c.text || '')
       .join('');
@@ -523,44 +540,24 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // If this was an edit-like tool, record it for accept/revert
     const editTools = new Set(['edit', 'write', 'multi-edit']);
-    const relFilePath = event.args?.path || event.args?.file_path || event.args?.filePath;
+    const args = call?.args ?? event.args;
+    const relFilePath = args?.path || args?.file_path || args?.filePath;
 
     let computedDiff = diff || '';
-    if (editTools.has(event.toolName) && !event.isError && relFilePath) {
-      const absPath = path.isAbsolute(relFilePath)
-        ? relFilePath
-        : path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', relFilePath);
-      try {
-        const uri = vscode.Uri.file(absPath);
-        const newContent = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
-        
-        // If RPC didn't send diff, generate unified diff manually from snapshot
-        if (!computedDiff) {
-          const original = await (this.edits as any).ensureSnapshot(absPath) || '';
-          if (original !== newContent) {
-            const fileName = path.basename(absPath);
-            const patch = require('diff').createPatch(fileName, original, newContent, 'a/' + fileName, 'b/' + fileName);
-            computedDiff = patch;
-          }
-        }
-
-        await this.edits.recordEdit(absPath, newContent, computedDiff);
-      } catch (err) {
-        console.warn('[pi] could not record edit:', err);
-      }
-    }
-
-    // For edit-like tools, include the full file content to compute diff
     let fileContent = '';
     if (editTools.has(event.toolName) && !event.isError && relFilePath) {
       const absPath = path.isAbsolute(relFilePath)
         ? relFilePath
         : path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', relFilePath);
       try {
+        await call?.snapshot;
         const uri = vscode.Uri.file(absPath);
-        fileContent = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+        const newContent = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+        fileContent = newContent;
+        const record = await this.edits.recordEdit(absPath, newContent, computedDiff);
+        computedDiff = record.diff;
       } catch (err) {
-        console.warn('[pi] could not read file for diff preview:', err);
+        console.warn('[pi] could not record edit:', err);
       }
     }
 
@@ -689,6 +686,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       const messages = await this.pi.getMessages();
       if (requestId !== this.historyRequestId) return;
       this.postMessage({ type: 'loadHistory', messages });
+      // The webview can be recreated while its in-memory Undo snapshots survive.
+      for (const record of this.edits.getPendingEdits()) this.onEditChanged(record);
     } catch (err) {
       if (requestId !== this.historyRequestId) return;
       this.postMessage({ type: 'error', message: `Failed to load session history: ${String(err)}. Reload the window to retry.` });

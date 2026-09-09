@@ -5,20 +5,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const readFile = mock(async (_uri: unknown) => Buffer.from('new content'));
+const writeFile = mock(async (_uri: unknown, _content: Uint8Array) => {});
+const deleteFile = mock(async (_uri: unknown) => {});
 const showQuickPick = mock(async (_items: any[], _options: unknown): Promise<any> => undefined);
 mock.module('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
-    fs: { readFile },
+    textDocuments: [],
+    fs: { readFile, writeFile, delete: deleteFile },
     registerTextDocumentContentProvider: () => {},
   },
   Uri: { file: (fsPath: string) => ({ fsPath }) },
   window: { showQuickPick },
+  EventEmitter: class {
+    private emitter = new EventEmitter();
+    event = (listener: (value: any) => void) => { this.emitter.on('change', listener); };
+    fire(value: any) { this.emitter.emit('change', value); }
+  },
 }));
 
 const { ChatSidebarProvider } = await import('../src/chatSidebarProvider.ts');
+const { EditManager } = await import('../src/editManager.ts');
 
-function createProvider(hydrated = true) {
+function createProvider(historyLoaded = true, editManager?: InstanceType<typeof EditManager>) {
   const pi = Object.assign(new EventEmitter(), {
     getState: mock(async (): Promise<any> => null),
     getSessionStats: async () => null,
@@ -29,17 +38,19 @@ function createProvider(hydrated = true) {
     getMessages: async () => [],
     isRunning: true,
   });
-  const edits = {
+  const edits = editManager ?? {
     onDidChange: () => {},
-    recordEdit: mock(async () => {}),
+    recordEdit: mock(async (_path: string, _content: string, diff: string) => ({ diff })),
+    snapshotFile: mock(async () => 'old content'),
     snapshotWorkspace: mock(async () => {}),
+    getPendingEdits: () => [],
     clear: mock(() => {}),
   };
   const messages: any[] = [];
   const workspaceState = { get: mock((_key: string): any => undefined), update: mock(async (_key: string, _value: any) => {}) };
   const provider = new ChatSidebarProvider({} as any, pi as any, edits as any, workspaceState as any);
-  // Most bridge tests start after startup hydration has completed.
-  (provider as any).historyLoading = !hydrated;
+  // Most bridge tests start after startup session history loading has completed.
+  (provider as any).historyLoading = !historyLoaded;
   // Exercise the real bridge without launching an extension host or Pi process.
   (provider as any)._view = {
     webview: { postMessage: (message: any) => messages.push(message) },
@@ -64,11 +75,71 @@ function toolEnd(isError: boolean) {
 afterEach(() => {
   readFile.mockReset();
   readFile.mockImplementation(async () => Buffer.from('new content'));
+  writeFile.mockClear();
+  deleteFile.mockClear();
   showQuickPick.mockReset();
   showQuickPick.mockImplementation(async () => undefined);
 });
 
 describe('tool completion bridge', () => {
+  test('Pi start args and arg-less completion produce working Diff / Keep / Undo', async () => {
+    const manager = new EditManager();
+    const { provider, messages } = createProvider(true, manager);
+    readFile.mockResolvedValueOnce(Buffer.from('old content'));
+    provider.handleToolStart({ toolCallId: 'edit-1', toolName: 'edit', args: { path: 'example.txt' } });
+    const { args, ...end } = toolEnd(false);
+    await provider.handleToolEnd(end);
+    const record = manager.getPendingEdits()[0];
+    expect(record.originalContent).toBe('old content');
+    expect(record.newContent).toBe('new content');
+    expect(record.diff).toContain('-old content');
+    expect(record.diff).toContain('+new content');
+    expect(messages.find(m => m.type === 'editRecorded')).toMatchObject({ editId: record.id });
+    expect(messages.find(m => m.type === 'toolDiff')?.diff).toBe(record.diff);
+    await provider.handleWebviewMessage({ type: 'revertEdit', editId: record.id });
+    expect(writeFile.mock.calls[0][1].toString()).toBe('old content');
+    expect(manager.getPendingEdits()).toHaveLength(0);
+    expect(messages.some(m => m.type === 'editReverted')).toBe(true);
+  });
+
+  test('write without a Pi diff generates a patch; Undo removes a newly created file', async () => {
+    const manager = new EditManager();
+    const { provider, messages } = createProvider(true, manager);
+    readFile.mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'FileNotFound' }));
+    provider.handleToolStart({ toolCallId: 'write-1', toolName: 'write', args: { file_path: 'new.txt' } });
+    await provider.handleToolEnd({ toolCallId: 'write-1', toolName: 'write', isError: false, result: {} });
+    const record = manager.getPendingEdits()[0];
+    expect(record.originalExists).toBe(false);
+    expect(messages.find(m => m.type === 'toolDiff')?.diff).toContain('+new content');
+    await manager.revertEdit(record.id);
+    expect(deleteFile).toHaveBeenCalledWith({ fsPath: '/workspace/new.txt' });
+  });
+
+  test('repeated edits share a baseline until Keep, then capture a fresh baseline', async () => {
+    const manager = new EditManager();
+    readFile.mockResolvedValueOnce(Buffer.from('original'));
+    await manager.snapshotFile('/workspace/example.txt');
+    const first = await manager.recordEdit('/workspace/example.txt', 'second', '');
+    await manager.snapshotWorkspace();
+    await manager.snapshotFile('/workspace/example.txt');
+    const second = await manager.recordEdit('/workspace/example.txt', 'third', '');
+    expect(second.id).toBe(first.id);
+    expect(second.originalContent).toBe('original');
+    expect(manager.getPendingEdits()).toHaveLength(1);
+    manager.acceptEdit(second.id);
+    readFile.mockResolvedValueOnce(Buffer.from('third'));
+    await manager.snapshotFile('/workspace/example.txt');
+    const next = await manager.recordEdit('/workspace/example.txt', 'fourth', '');
+    expect(next.id).not.toBe(first.id);
+    expect(next.originalContent).toBe('third');
+  });
+
+  test('never takes an Undo snapshot after completion', async () => {
+    const manager = new EditManager();
+    await expect(manager.recordEdit('/workspace/example.txt', 'changed', '')).rejects.toThrow('Cannot snapshot');
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
   test('process exit settles tools before displaying the error banner', async () => {
     const { pi, messages } = createProvider();
     pi.emit('exit', 1, null, 'crashed');
@@ -210,7 +281,18 @@ describe('session identity', () => {
   });
 });
 
-describe('history hydration', () => {
+describe('session history loading', () => {
+  test('reopening the webview restores review controls for retained snapshots', async () => {
+    const manager = new EditManager();
+    await manager.snapshotFile('/workspace/example.txt');
+    const record = await manager.recordEdit('/workspace/example.txt', 'changed', '');
+    const { provider, messages } = createProvider(true, manager);
+    await provider.loadHistory();
+    expect(messages.find(m => m.type === 'editRecorded')?.editId).toBe(record.id);
+    expect(messages.find(m => m.type === 'editsSummary')?.pending).toHaveLength(1);
+    expect(messages.findIndex(m => m.type === 'loadHistory')).toBeLessThan(messages.findIndex(m => m.type === 'editRecorded'));
+  });
+
   test('a superseded startup history load does not overwrite the new session', async () => {
     const { provider, pi, messages } = createProvider();
     let release!: (value: any[]) => void;
