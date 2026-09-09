@@ -63,7 +63,7 @@ code --install-extension iqbalabiyoga.pi-vscode-chat
 - **Slash commands** — `/` autocompletes every pi command, skill, prompt template on your machine (rtk, caveman, team-init, etc.).
 - **`@` file search** — inline fuzzy file search: `@` + filename to reference workspace files.
 - **Edit tracking** — every agent file edit gets Diff / Keep / Undo. A "Keep all / Undo all" changes bar lets you batch-accept or batch-revert edits from the current session.
-- **Session management** — persistent JSONL sessions; browse and resume previous pi sessions per workspace.
+- **Session management** — persistent JSONL sessions; browse and resume previous pi sessions per workspace. The chat header shows the current session name (or ID if unnamed); hover for the full name and ID. Names refresh after `/name` when provided by a host extension such as `pi-deepseek-theme`.
 - **Live stats** — context usage %, session cost, token totals in the footer.
 - **Model & thinking level** — QuickPick to switch models; cycle reasoning effort (off → minimal → low → medium → high → xhigh) from the toolbar.
 - **Extension status chips** — pi extensions surface as interactive chips: toggle rtk on/off, change caveman compression level, open the agents-team panel (Init / Result / Stop).

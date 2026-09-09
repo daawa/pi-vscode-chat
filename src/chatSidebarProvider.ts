@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { PiRpcClient } from './piRpcClient.ts';
 import { EditManager } from './editManager.ts';
+import { LAST_SESSION_FILE_STATE_KEY } from './types.ts';
 import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord, ChatStyle } from './types.ts';
 
 /**
@@ -13,12 +14,16 @@ import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, E
 export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private isStreaming = false;
+  private stateRequestId = 0;
+  private historyRequestId = 0;
+  private historyLoading = true;
   private diffContentProvider = new PiOriginalContentProvider();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly pi: PiRpcClient,
     private readonly edits: EditManager,
+    private readonly workspaceState: vscode.Memento,
   ) {
     this.pi.on('event', this.onPiEvent.bind(this));
     this.pi.on('exit', (code: number | null, signal: string | null, stderr?: string) => {
@@ -65,16 +70,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   /** Start a fresh session (also callable from command palette) */
   async newSession(): Promise<void> {
-    await this.pi.newSession();
-    this.edits.clear();
-    this.postMessage({ type: 'sessionCleared' });
-    this.sendState();
-    this.sendStats();
+    const requestId = this.invalidateHistory();
+    try {
+      await this.pi.newSession();
+      this.edits.clear();
+      this.postMessage({ type: 'sessionCleared' });
+      this.sendState();
+      this.sendStats();
+    } finally {
+      if (requestId === this.historyRequestId) this.setHistoryLoading(false);
+    }
   }
 
   // ── Webview Message Handler ──
 
   private async handleWebviewMessage(msg: WebviewMessage): Promise<void> {
+    // The webview also gates submission, but queued IPC must not bypass hydration.
+    if (this.historyLoading && (msg.type === 'prompt' || msg.type === 'runCommand')) return;
     switch (msg.type) {
       case 'prompt':
         await this.handlePrompt(msg.text, msg.images, msg.streaming);
@@ -147,11 +159,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.sendState();
         this.sendCommands();
         this.sendStats();
+        await this.loadHistory();
         break;
       case 'runCommand':
         // Extension commands (e.g. /rtk, /caveman, /team-*) execute
         // immediately even while the agent is streaming — no chat bubble.
-        this.pi.prompt(msg.command).catch(() => {});
+        await this.pi.prompt(msg.command).catch(() => {});
+        await this.sendState();
         break;
       case 'searchFile':
         await this.handleSearchFile(msg.query);
@@ -209,40 +223,47 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       const content = fs.readFileSync(filePath, 'utf-8');
       const lines = content.split('\n');
       let name: string | undefined;
+      let firstPrompt: string | undefined;
       for (const line of lines) {
         if (!line.trim()) continue;
         let obj: any;
         try { obj = JSON.parse(line); } catch { continue; }
-        if (obj.type === 'session' && obj.name) name = obj.name;
-        if (obj.type === 'message' && obj.message?.role === 'user') {
-          const text = Array.isArray(obj.message.content)
+        if (obj.type === 'session' || obj.type === 'session_info') {
+          name = typeof obj.name === 'string' ? obj.name.trim() : undefined;
+        }
+        if (firstPrompt === undefined && obj.type === 'message' && obj.message?.role === 'user') {
+          firstPrompt = (Array.isArray(obj.message.content)
             ? obj.message.content.map((c: any) => c.text || '').join('')
-            : String(obj.message.content);
-          const t = (name || text).trim();
-          return t.slice(0, 60) + (t.length > 60 ? '…' : '');
+            : String(obj.message.content)).trim();
         }
       }
+      // Names are appended as session_info entries, often after the first prompt.
       if (name) return name;
+      if (firstPrompt) return firstPrompt.slice(0, 60) + (firstPrompt.length > 60 ? '…' : '');
     } catch { /* ignore */ }
     return path.basename(filePath, '.jsonl');
   }
 
   private async handleResumeSession(filePath: string): Promise<void> {
-    // Prefer in-process switch; fall back to restart if pi is not running
-    let ok = false;
-    if (this.pi.isRunning) {
-      ok = await this.pi.switchSession(filePath).catch(() => false);
+    const requestId = this.invalidateHistory();
+    try {
+      // Prefer in-process switch; fall back to restart if pi is not running
+      let ok = false;
+      if (this.pi.isRunning) {
+        ok = await this.pi.switchSession(filePath).catch(() => false);
+      }
+      if (!ok) {
+        this.pi.stop();
+        this.pi.start(filePath);
+      }
+      this.edits.clear();
+      // Load history through RPC (respects branches/compaction)
+      await this.loadHistory();
+      this.sendState();
+      this.sendStats();
+    } finally {
+      if (requestId === this.historyRequestId) this.setHistoryLoading(false);
     }
-    if (!ok) {
-      this.pi.stop();
-      this.pi.start(filePath);
-    }
-    this.edits.clear();
-    // Load history through RPC (respects branches/compaction)
-    const messages = await this.pi.getMessages().catch(() => []);
-    this.postMessage({ type: 'loadHistory', messages });
-    this.sendState();
-    this.sendStats();
   }
 
   // ── Files ──
@@ -283,7 +304,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const isCommand = text.startsWith('/');
     this.postMessage({ type: 'userMessage', text, queued: !!streaming && !isCommand });
 
-    if (!streaming) {
+    // Extension commands may finish without any agent_start/agent_end events.
+    if (!streaming && !isCommand) {
       this.setStreaming(true);
       await this.edits.snapshotWorkspace();
     }
@@ -294,6 +316,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       this.postMessage({ type: 'error', message: result.error || 'Failed to send prompt to pi' });
       if (!streaming) this.setStreaming(false);
     }
+    // /name (and other extension commands) may update state without an agent run.
+    // Read the authoritative value, not the command arguments or notification text.
+    if (isCommand) await this.sendState();
   }
 
   private async handleShowDiff(editId: string): Promise<void> {
@@ -616,7 +641,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendState(): Promise<void> {
+    const requestId = ++this.stateRequestId;
     const state = await this.pi.getState().catch(() => null);
+    if (requestId !== this.stateRequestId) return;
+    if (state?.sessionFile) {
+      void this.workspaceState.update(LAST_SESSION_FILE_STATE_KEY, state.sessionFile);
+    }
     this.postMessage({
       type: 'init',
       model: state?.model ? `${state.model.provider}/${state.model.id}` : 'unknown',
@@ -624,6 +654,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       thinkingLevel: state?.thinkingLevel || 'off',
       state: this.isStreaming || state?.isStreaming ? 'streaming' : 'idle',
       sessionName: state?.sessionName,
+      sessionId: state?.sessionId,
     });
   }
 
@@ -635,6 +666,36 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private async sendStats(): Promise<void> {
     const stats = await this.pi.getSessionStats().catch(() => null);
     this.postMessage({ type: 'stats', stats });
+  }
+
+  private setHistoryLoading(loading: boolean): void {
+    this.historyLoading = loading;
+    this.postMessage({ type: 'historyLoading', loading });
+  }
+
+  private invalidateHistory(): number {
+    this.setHistoryLoading(true);
+    return ++this.historyRequestId;
+  }
+
+  private async loadHistory(): Promise<void> {
+    const requestId = this.invalidateHistory();
+    try {
+      // On startup the webview can post 'ready' before the pi process is up.
+      for (let i = 0; i < 10 && !this.pi.isRunning; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (requestId !== this.historyRequestId) return;
+      const messages = await this.pi.getMessages();
+      if (requestId !== this.historyRequestId) return;
+      this.postMessage({ type: 'loadHistory', messages });
+    } catch (err) {
+      if (requestId !== this.historyRequestId) return;
+      this.postMessage({ type: 'error', message: `Failed to load session history: ${String(err)}. Reload the window to retry.` });
+    } finally {
+      // An obsolete request must not unlock a newer session's composer.
+      if (requestId === this.historyRequestId) this.setHistoryLoading(false);
+    }
   }
 
   private postMessage(msg: WebviewOutMessage): void {
@@ -671,6 +732,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div id="app">
+    <div id="session-header" class="hidden" role="status" aria-live="polite">
+      <span class="session-label">Session</span>
+      <span id="session-name"></span>
+    </div>
     <div id="sessions-panel" class="hidden">
       <div id="sessions-panel-header">
         <span>Chat history</span>

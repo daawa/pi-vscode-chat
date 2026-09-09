@@ -7,6 +7,7 @@ import * as cp from 'child_process';
 import { PiRpcClient } from './piRpcClient.ts';
 import { ChatSidebarProvider } from './chatSidebarProvider.ts';
 import { EditManager } from './editManager.ts';
+import { LAST_SESSION_FILE_STATE_KEY } from './types.ts';
 let piClient: PiRpcClient | undefined;
 let editManager: EditManager | undefined;
 let sidebarProvider: ChatSidebarProvider | undefined;
@@ -26,7 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
   piClient.setExtraEnv(extraEnv);
 
   // ── Register sidebar ──
-  sidebarProvider = new ChatSidebarProvider(context.extensionUri, piClient, editManager);
+  sidebarProvider = new ChatSidebarProvider(context.extensionUri, piClient, editManager, context.workspaceState);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('piChat.sidebar', sidebarProvider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -185,8 +186,14 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   } else {
     try {
-      piClient.start();
-      console.log('[pi-chat] pi process started');
+      const lastSessionFile = context.workspaceState.get<string>(LAST_SESSION_FILE_STATE_KEY);
+      if (lastSessionFile && fs.existsSync(lastSessionFile)) {
+        piClient.start(lastSessionFile);
+        console.log('[pi-chat] pi process started on last session');
+      } else {
+        piClient.start();
+        console.log('[pi-chat] pi process started');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       vscode.window.showErrorMessage(`Pi Chat: Failed to start pi process: ${msg}`);

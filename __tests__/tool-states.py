@@ -39,7 +39,12 @@ def load_fixture(saved_state=None):
       document.documentElement.style.setProperty('--card-bg', '#ffffff');
       document.documentElement.style.setProperty('--text-dim', '#64748b');
     ''')
-    js((root / 'media/main.js').read_text())
+    # Keep each CDP request below the browser-harness daemon's line-size limit.
+    source = (root / 'media/main.js').read_text()
+    js('window.testMainSource = "";')
+    for offset in range(0, len(source), 6000):
+        js('window.testMainSource += ' + json.dumps(source[offset:offset + 6000]))
+    js('(0, eval)(window.testMainSource); delete window.testMainSource;')
     js('''new Promise((resolve, reject) => {
       const link = document.getElementById('chat-style');
       if (link.sheet) return resolve();
@@ -51,6 +56,39 @@ def load_fixture(saved_state=None):
 target = new_tab('about:blank')
 try:
     load_fixture()
+    js('''(() => {
+      const assert = (value, message) => { if (!value) throw new Error(message); };
+      const send = data => window.dispatchEvent(new MessageEvent('message', {data}));
+      const input = document.getElementById('input');
+      const button = document.getElementById('btn-send');
+      const submissions = () => testPostedMessages.filter(m => m.type === 'prompt' || m.type === 'runCommand');
+      assert(input.readOnly && button.disabled && input.placeholder.includes('Loading'), 'Startup must lock the composer');
+      send({type: 'setInputText', text: 'Preserved draft'});
+      send({type: 'init', state: 'idle', sessionId: 'resumed'});
+      assert(button.disabled, 'Init or input update unlocked submission before history');
+      input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      button.click();
+      document.querySelector('[data-cmd]').click();
+      assert(submissions().length === 0 && input.value === 'Preserved draft', 'Loading submitted or lost the draft');
+      send({type: 'loadHistory', messages: [{role: 'user', content: 'Earlier context'}]});
+      assert(button.disabled, 'Snapshot alone must not bypass the loading lifecycle');
+      send({type: 'historyLoading', loading: false});
+      assert(!input.readOnly && !button.disabled, 'Successful history did not unlock');
+      assert(document.getElementById('messages').textContent.includes('Earlier context'), 'History was not rendered');
+      input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+      assert(submissions().length === 1 && submissions()[0].text === 'Preserved draft', 'Ready composer did not submit draft');
+
+      send({type: 'historyLoading', loading: true});
+      send({type: 'setInputText', text: 'Retry draft'});
+      send({type: 'error', message: 'Failed to load session history'});
+      send({type: 'historyLoading', loading: false});
+      assert(!input.readOnly && !button.disabled, 'History failure left composer locked');
+      assert(document.querySelector('.error-banner').textContent.includes('Failed to load'), 'History failure was not visible');
+      button.click();
+      assert(submissions().length === 2 && submissions()[1].text === 'Retry draft', 'Cannot submit after visible failure');
+    })()''')
+    print('PASS: Startup blocks Enter, Send and commands until history is rendered, preserving the draft')
+    print('PASS: A visible history failure unlocks the composer')
     results = js('''(() => {
       const passed = [];
       const assert = (condition, message) => {
@@ -85,6 +123,44 @@ try:
         isError, content: [{ type: 'text', text: isError ? 'Failed' : 'OK' }] });
       const diff = id => send({ type: 'toolDiff', toolCallId: id, filePath: 'example.txt',
         fileContent: 'new', diff: '--- a/example.txt\\n+++ b/example.txt\\n@@ -1 +1 @@\\n-old\\n+new' });
+
+      test('session label uses name, falls back to ID, and clears stale identity', () => {
+        const header = document.getElementById('session-header');
+        const label = document.getElementById('session-name');
+        const init = metadata => send({ type: 'init', state: 'idle', ...metadata });
+        assert(header.classList.contains('hidden'), 'Unknown session should be hidden');
+        init({ sessionId: 'full-session-uuid' });
+        assert(label.textContent === 'full-session-uuid', 'Missing ID fallback');
+        assert(!header.classList.contains('hidden'), 'Session ID should be visible');
+        init({ sessionId: 'full-session-uuid', sessionName: 'My session' });
+        assert(label.textContent === 'My session', 'Name should take precedence');
+        assert(label.title.includes('My session') && label.title.includes('full-session-uuid'), 'Tooltip should include name and ID');
+        init({ sessionId: 'full-session-uuid', sessionName: '<b>Renamed</b>' });
+        assert(label.textContent === '<b>Renamed</b>' && !label.querySelector('b'), 'Name must render as text');
+        init({ sessionId: 'next-session' });
+        assert(label.textContent === 'next-session', 'Old name leaked into next session');
+        init({ sessionId: 'next-session', sessionName: '' });
+        assert(label.textContent === 'next-session', 'Cleared name should fall back to ID');
+        reset();
+        assert(header.classList.contains('hidden') && !label.textContent && !label.title, 'New session must clear identity');
+        init({ sessionId: 'session-3', sessionName: 'Resumed' });
+        init({});
+        assert(header.classList.contains('hidden'), 'Unavailable state must not retain old name');
+      });
+
+      test('session label truncates long names without losing full text', () => {
+        const name = 'A very long session name '.repeat(40);
+        send({ type: 'init', state: 'idle', sessionId: 'session-1', sessionName: name });
+        const header = document.getElementById('session-header');
+        const label = document.getElementById('session-name');
+        header.style.width = '240px';
+        const style = getComputedStyle(label);
+        assert(style.textOverflow === 'ellipsis' && style.whiteSpace === 'nowrap', 'Missing truncation styles');
+        assert(label.scrollWidth > label.clientWidth, 'Long name should overflow its label');
+        assert(label.getBoundingClientRect().right <= header.getBoundingClientRect().right, 'Label overflows header');
+        assert(label.textContent === name && label.title.includes(name), 'Full name was lost');
+        header.style.width = '';
+      });
 
       test('ordinary failure remains failed after agentEnd', () => {
         start('failed'); check('failed', 'running'); end('failed', true);
@@ -167,11 +243,11 @@ try:
 
       return { passed, errors: testErrors };
     })()''')
-    assert isinstance(results, dict) and len(results.get('passed', [])) == 10, results
+    assert isinstance(results, dict) and len(results.get('passed', [])) == 12, results
     assert not results['errors'], results['errors']
     for name in results['passed']:
         print('PASS:', name)
-    print('10 tool-state regression tests passed')
+    print('12 session/tool-state regression tests passed')
 
     # Use a real browser click to exercise the footer action, including layout.
     cdp('Emulation.setDeviceMetricsOverride', width=360, height=800, deviceScaleFactor=1, mobile=False)
@@ -219,6 +295,9 @@ try:
 
       await select('default');
       assert(link.getAttribute('href') === link.dataset.default, 'Default stylesheet not selected');
+      send({type: 'init', state: 'idle', sessionName: 'Default style session', sessionId: 'session-1'});
+      assert(document.getElementById('session-name').textContent === 'Default style session', 'Default missing session label');
+      assert(getComputedStyle(document.getElementById('session-name')).textOverflow === 'ellipsis', 'Default missing session truncation');
       assert(getComputedStyle(failure).backgroundColor === 'rgb(255, 255, 255)', 'Default retained custom background');
       assert(getComputedStyle(failure.querySelector('.tool-status')).color === 'rgb(255, 0, 0)', 'Default missing error styling');
       assert(getComputedStyle(document.querySelector('#tool-styled-interrupted .tool-status')).color === 'rgb(255, 170, 0)', 'Default missing interrupted styling');
@@ -262,6 +341,6 @@ try:
         print('PASS: Saved style is restored in a fresh webview')
     finally:
         cdp('Target.closeTarget', targetId=restored_target)
-    print('16 webview regression tests passed')
+    print('20 webview regression tests passed')
 finally:
     cdp('Target.closeTarget', targetId=target)
