@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { PiRpcClient } from './piRpcClient.ts';
 import { EditManager } from './editManager.ts';
-import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord } from './types.ts';
+import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord, ChatStyle } from './types.ts';
 
 /**
  * WebviewViewProvider for the Pi Chat sidebar.
@@ -126,6 +126,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'configureProvider':
         await vscode.commands.executeCommand('piChat.configureProvider');
+        break;
+      case 'selectStyle':
+        await this.handleSelectStyle(msg.currentStyle);
         break;
       case 'setThinkingLevel':
         await this.pi.setThinkingLevel(msg.level);
@@ -348,6 +351,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       await this.pi.setModel(picked.provider, picked.modelId);
       this.sendState();
     }
+  }
+
+  private async handleSelectStyle(currentStyle: ChatStyle): Promise<void> {
+    const styles: (vscode.QuickPickItem & { style: ChatStyle })[] = [
+      { label: 'Default', detail: 'Uses VS Code theme colors.', style: 'default' },
+      { label: 'Custom', detail: 'Tinted tool results and light blue code blocks.', style: 'custom' },
+    ];
+    const picked = await vscode.window.showQuickPick(
+      styles.map(item => ({ ...item, description: item.style === currentStyle ? 'Current' : undefined })),
+      { title: 'Chat style', placeHolder: 'Select a style for Pi Chat' },
+    );
+    if (picked) this.postMessage({ type: 'styleSelected', style: picked.style });
   }
 
   // ── pi Event Handler ──
@@ -629,7 +644,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // ── HTML ──
 
   private getHtml(webview: vscode.Webview): string {
-    const styleUri = webview.asWebviewUri(
+    const defaultStyleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'style.css'),
+    );
+    const customStyleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'style.custom.css'),
     );
     const scriptUri = webview.asWebviewUri(
@@ -648,7 +666,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data: https:; font-src ${webview.cspSource};">
-  <link rel="stylesheet" href="${styleUri}">
+  <link id="chat-style" rel="stylesheet" href="${customStyleUri}" data-default="${defaultStyleUri}" data-custom="${customStyleUri}">
   <title>Pi Chat</title>
 </head>
 <body>
@@ -713,9 +731,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         </div>
         <div id="footer-bar">
           <div id="footer-left">
-            <button id="btn-history" class="footer-link" title="Chat history">History</button>
-            <button id="btn-new" class="footer-link" title="New chat">New chat</button>
+            <button id="btn-history" class="footer-link" title="Chat history">🕘 History</button>
+            <button id="btn-new" class="footer-link" title="New chat">💬 New chat</button>
             <button id="btn-keys" class="footer-link" title="Configure AI Provider Keys">🔑 Keys</button>
+            <button id="btn-style" class="footer-link" title="Select chat style">🎨 Style</button>
           </div>
           <div id="footer-stats" title="Session usage"></div>
         </div>

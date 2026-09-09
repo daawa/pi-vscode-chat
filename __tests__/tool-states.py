@@ -15,26 +15,42 @@ html = provider.split('return /* html */`', 1)[1].split('`;', 1)[0]
 # Resource URIs and CSP belong to the extension host, not this isolated fixture.
 html = re.sub(r'<meta http-equiv="Content-Security-Policy"[^>]*>', '', html)
 html = re.sub(r'<script\b[^>]*>.*?</script>', '', html, flags=re.S)
-html = re.sub(r'<link\b[^>]*>', '', html)
 
-target = new_tab('about:blank')
-try:
-    js('document.open(); document.write(' + json.dumps(html) + '); document.close();')
+
+def load_fixture(saved_state=None):
+    fixture_html = html
+    for token, filename in [('defaultStyleUri', 'style.css'), ('customStyleUri', 'style.custom.css')]:
+        css = (root / 'media' / filename).read_text()
+        uri = js('URL.createObjectURL(new Blob([' + json.dumps(css) + '], {type: "text/css"}))')
+        fixture_html = fixture_html.replace('${' + token + '}', uri)
+    js('document.open(); document.write(' + json.dumps(fixture_html) + '); document.close();')
+    js('window.testSavedState = ' + json.dumps(saved_state) + ';')
     js('''
+      window.testPostedMessages = [];
       window.acquireVsCodeApi = () => ({
-        getState: () => null, setState: () => {}, postMessage: () => {}
+        getState: () => structuredClone(testSavedState),
+        setState: value => { testSavedState = structuredClone(value); },
+        postMessage: message => testPostedMessages.push(message)
       });
       window.testErrors = [];
       window.addEventListener('error', event => testErrors.push(event.message));
-    ''')
-    js('''(() => {
-      const style = document.createElement('style');
-      style.textContent = ''' + json.dumps((root / 'media/style.custom.css').read_text()) + ''';
-      document.head.appendChild(style);
       document.documentElement.style.setProperty('--warning', '#ffaa00');
       document.documentElement.style.setProperty('--error', '#ff0000');
-    })()''')
+      document.documentElement.style.setProperty('--card-bg', '#ffffff');
+      document.documentElement.style.setProperty('--text-dim', '#64748b');
+    ''')
     js((root / 'media/main.js').read_text())
+    js('''new Promise((resolve, reject) => {
+      const link = document.getElementById('chat-style');
+      if (link.sheet) return resolve();
+      link.addEventListener('load', resolve, {once: true});
+      link.addEventListener('error', () => reject(new Error('Stylesheet failed to load')), {once: true});
+    })''')
+
+
+target = new_tab('about:blank')
+try:
+    load_fixture()
     results = js('''(() => {
       const passed = [];
       const assert = (condition, message) => {
@@ -155,6 +171,97 @@ try:
     assert not results['errors'], results['errors']
     for name in results['passed']:
         print('PASS:', name)
-    print('10 webview regression tests passed')
+    print('10 tool-state regression tests passed')
+
+    # Use a real browser click to exercise the footer action, including layout.
+    cdp('Emulation.setDeviceMetricsOverride', width=360, height=800, deviceScaleFactor=1, mobile=False)
+    button = next(node for node in cdp('Accessibility.getFullAXTree')['nodes']
+                  if node.get('role', {}).get('value') == 'button'
+                  and node.get('name', {}).get('value') == 'Select chat style (current: Custom)')
+    bounds = cdp('DOM.getBoxModel', backendNodeId=button['backendDOMNodeId'])['model']['content']
+    click_at_xy(sum(bounds[0::2]) / 4, sum(bounds[1::2]) / 4)
+    assert js('testPostedMessages.at(-1)') == {'type': 'selectStyle', 'currentStyle': 'custom'}
+    assert js('''(() => {
+      const keys = document.getElementById('btn-keys');
+      const style = document.getElementById('btn-style');
+      return keys.nextElementSibling === style
+        && style.getBoundingClientRect().left >= keys.getBoundingClientRect().right;
+    })()'''), 'Style button must be to the right of Keys'
+    print('PASS: Style button opens the picker next to Keys in a narrow sidebar')
+
+    style_results = js('''(async () => {
+      const passed = [];
+      const assert = (condition, message) => { if (!condition) throw new Error(message); };
+      const send = data => window.dispatchEvent(new MessageEvent('message', {data}));
+      const link = document.getElementById('chat-style');
+      const select = style => new Promise((resolve, reject) => {
+        link.addEventListener('load', resolve, {once: true});
+        link.addEventListener('error', () => reject(new Error('Stylesheet failed to load')), {once: true});
+        send({type: 'styleSelected', style});
+      });
+      const saved = async () => {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return testSavedState;
+      };
+      send({type: 'loadHistory', messages: [
+        {role: 'assistant', content: [
+          {type: 'toolCall', id: 'styled-failure', name: 'bash', arguments: {}},
+          {type: 'toolCall', id: 'styled-unknown', name: 'read', arguments: {}}
+        ]},
+        {role: 'toolResult', toolCallId: 'styled-failure', isError: true, content: [{text: 'Failed'}]}
+      ]});
+      send({type: 'toolStart', messageId: 'current', toolCallId: 'styled-interrupted', toolName: 'bash', args: '{}'});
+      send({type: 'agentEnd'});
+      const failure = document.getElementById('tool-styled-failure');
+      failure.open = true;
+      document.getElementById('input').value = 'Unsent draft';
+      const content = document.getElementById('messages').innerHTML;
+
+      await select('default');
+      assert(link.getAttribute('href') === link.dataset.default, 'Default stylesheet not selected');
+      assert(getComputedStyle(failure).backgroundColor === 'rgb(255, 255, 255)', 'Default retained custom background');
+      assert(getComputedStyle(failure.querySelector('.tool-status')).color === 'rgb(255, 0, 0)', 'Default missing error styling');
+      assert(getComputedStyle(document.querySelector('#tool-styled-interrupted .tool-status')).color === 'rgb(255, 170, 0)', 'Default missing interrupted styling');
+      assert(getComputedStyle(document.querySelector('#tool-styled-unknown .tool-status')).color === 'rgb(100, 116, 139)', 'Default missing unknown styling');
+      assert(document.getElementById('messages').innerHTML === content, 'Style switch changed conversation');
+      assert(document.getElementById('input').value === 'Unsent draft', 'Style switch cleared draft');
+      assert((await saved()).style === 'default', 'Default preference not saved');
+      passed.push('Default style updates all tool states without changing chat or draft');
+
+      await select('custom');
+      assert(link.getAttribute('href') === link.dataset.custom, 'Custom stylesheet not selected');
+      assert(getComputedStyle(failure).backgroundColor === 'rgb(253, 236, 234)', 'Custom missing tinted background');
+      assert((await saved()).style === 'custom', 'Custom preference not saved');
+      passed.push('Custom style restores tinted backgrounds and saves the selection');
+
+      send({type: 'styleSelected', style: 'https://invalid.example/theme.css'});
+      assert(link.getAttribute('href') === link.dataset.custom, 'Untrusted stylesheet URL accepted');
+      passed.push('Invalid styles fall back to a bundled stylesheet');
+
+      await select('default');
+      send({type: 'sessionCleared'});
+      assert((await saved()).style === 'default', 'New chat reset the preference');
+      assert(document.getElementById('btn-style').title.includes('Default'), 'Button has stale style label');
+      passed.push('New chat preserves the selected style');
+      assert(testErrors.length === 0, testErrors.join('; '));
+      return {passed, savedState: testSavedState};
+    })()''')
+    assert len(style_results['passed']) == 4, style_results
+    for name in style_results['passed']:
+        print('PASS:', name)
+
+    # A fresh JS context models disposal/restoration of the VS Code webview.
+    restored_target = new_tab('about:blank')
+    try:
+        load_fixture(style_results['savedState'])
+        assert js('''(() => {
+          const link = document.getElementById('chat-style');
+          return link.getAttribute('href') === link.dataset.default
+            && document.getElementById('btn-style').title.includes('Default');
+        })()'''), 'Saved style was not restored in a fresh webview'
+        print('PASS: Saved style is restored in a fresh webview')
+    finally:
+        cdp('Target.closeTarget', targetId=restored_target)
+    print('16 webview regression tests passed')
 finally:
     cdp('Target.closeTarget', targetId=target)

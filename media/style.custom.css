@@ -807,14 +807,17 @@ pre:hover .code-copy { opacity: 1; }
 /* Footer */
 #footer-bar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   justify-content: space-between;
   align-items: center;
   padding: 4px 2px 2px;
   font-size: 10.5px;
   color: var(--text-dim);
 }
-#footer-left { display: flex; gap: 2px; }
+#footer-left { display: flex; flex-wrap: wrap; gap: 2px; }
 .footer-link {
+  white-space: nowrap;
   background: none;
   border: none;
   color: var(--text-dim);

@@ -68,7 +68,7 @@ code --install-extension iqbalabiyoga.pi-vscode-chat
 - **Model & thinking level** — QuickPick to switch models; cycle reasoning effort (off → minimal → low → medium → high → xhigh) from the toolbar.
 - **Extension status chips** — pi extensions surface as interactive chips: toggle rtk on/off, change caveman compression level, open the agents-team panel (Init / Result / Stop).
 - **Attachments** — VS Code file picker, image paste from clipboard, drag & drop from Explorer or Finder.
-- **Theme-native UI** — every color derives from VS Code theme tokens. Light, dark, and high-contrast all work. No CDN assets. Strict Content Security Policy.
+- **Selectable chat styles** — click **Style** to the right of **Keys** in the footer. Choose **Default** for VS Code theme colors (light, dark, and high-contrast), or **Custom** for tinted tool results and light blue code blocks. The choice is saved across chat sessions and webview reloads. No CDN assets. Strict Content Security Policy.
 
 ---
 
