@@ -392,16 +392,35 @@
     } catch { return ''; }
   }
 
+  function setToolState(card, status) {
+    card.classList.remove('running', 'done', 'error', 'interrupted', 'unknown');
+    card.classList.add(status);
+    const statusEl = card.querySelector('.tool-status');
+    statusEl.innerHTML = status === 'running' ? '<span class="spinner"></span>'
+      : status === 'done' ? ICONS.check
+      : status === 'unknown' ? '?'
+      : ICONS.cross;
+    const label = {
+      running: 'Running',
+      done: 'Succeeded',
+      error: 'Failed',
+      interrupted: 'Interrupted — no result received',
+      unknown: 'No result available',
+    }[status];
+    statusEl.title = label;
+    statusEl.setAttribute('aria-label', label);
+  }
+
   function addToolCard(msg) {
     const toolMsg = document.querySelector(`[data-msg-id="${msg.messageId === 'current' ? state.currentMessageId : msg.messageId}"]`) || getOrCreateMessage('assistant');
     const content = toolMsg.querySelector('.message-content');
 
     const subject = toolSubject(msg.toolName, msg.args);
-    const card = createElement('details', 'tool-card running');
+    const card = createElement('details', 'tool-card');
     card.id = `tool-${msg.toolCallId}`;
     card.innerHTML = `
       <summary>
-        <span class="tool-status"><span class="spinner"></span></span>
+        <span class="tool-status"></span>
         <span class="tool-icon">${toolIcon(msg.toolName)}</span>
         <span class="tool-name">${escapeHtml(msg.toolName)}</span>
         <span class="tool-subject">${escapeHtml(subject)}</span>
@@ -411,6 +430,7 @@
         <pre class="tool-args"><code>${escapeHtml(typeof msg.args === 'string' ? msg.args : JSON.stringify(msg.args, null, 2))}</code></pre>
         <pre class="tool-output hidden"><code></code></pre>
       </div>`;
+    setToolState(card, 'running');
     content.appendChild(card);
     scrollToBottom();
   }
@@ -429,19 +449,22 @@
   function endToolCard(msg) {
     const card = document.getElementById(`tool-${msg.toolCallId}`);
     if (!card) return;
-    card.classList.remove('running');
-    card.classList.add(msg.isError ? 'error' : 'done');
-    card.querySelector('.tool-status').innerHTML = msg.isError ? ICONS.cross : ICONS.check;
+    setToolState(card, msg.isError ? 'error' : 'done');
+    if (msg.isError) card.querySelector('.tool-diff')?.remove();
     if (msg.output) {
       const out = card.querySelector('.tool-output');
       out.classList.remove('hidden');
       const text = cleanAnsi(msg.output);
       out.querySelector('code').textContent = text.length > 8000 ? text.slice(0, 8000) + '\n…(truncated)' : text;
     }
-    // Render inline diff for edit-like tools
-    if (msg.diff && msg.filePath && !msg.isError) {
-      renderInlineDiff(card, msg.filePath, msg.fileContent || '', msg.diff);
-    }
+    saveState();
+  }
+
+  function updateToolDiff(msg) {
+    const card = document.getElementById(`tool-${msg.toolCallId}`);
+    // Diff enrichment must never change a tool's execution outcome.
+    if (!card?.classList.contains('done') || !msg.diff || !msg.filePath) return;
+    renderInlineDiff(card, msg.filePath, msg.fileContent || '', msg.diff);
     saveState();
   }
 
@@ -628,10 +651,11 @@
             contentEl.appendChild(textEl);
           } else if (item.type === 'toolCall') {
             const subject = toolSubject(item.name, item.arguments);
-            const card = createElement('details', 'tool-card done');
+            const card = createElement('details', 'tool-card');
+            card.id = `tool-${item.id}`;
             card.innerHTML = `
               <summary>
-                <span class="tool-status">${ICONS.check}</span>
+                <span class="tool-status"></span>
                 <span class="tool-icon">${toolIcon(item.name)}</span>
                 <span class="tool-name">${escapeHtml(item.name)}</span>
                 <span class="tool-subject">${escapeHtml(subject)}</span>
@@ -641,17 +665,14 @@
                 <pre class="tool-args"><code>${escapeHtml(JSON.stringify(item.arguments ?? {}, null, 2))}</code></pre>
                 <pre class="tool-output hidden"><code></code></pre>
               </div>`;
+            setToolState(card, 'unknown');
             contentEl.appendChild(card);
             toolCards[item.id] = card;
           }
         });
       } else if (m.role === 'toolResult' && toolCards[m.toolCallId]) {
         const card = toolCards[m.toolCallId];
-        if (m.isError) {
-          card.classList.remove('done');
-          card.classList.add('error');
-          card.querySelector('.tool-status').innerHTML = ICONS.cross;
-        }
+        setToolState(card, m.isError ? 'error' : 'done');
         const text = (m.content || []).map(c => c.text || '').join('');
         if (text) {
           const out = card.querySelector('.tool-output');
@@ -1191,6 +1212,10 @@
         endToolCard(msg);
         break;
 
+      case 'toolDiff':
+        updateToolDiff(msg);
+        break;
+
       case 'editRecorded':
         addEditCard(msg.filePath, msg.editId);
         break;
@@ -1233,10 +1258,9 @@
           el.classList.remove('live');
           highlightAll(el);
         });
-        // Settle any still-running tool cards (aborted)
+        // No result was received for these tools; don't imply execution failed.
         document.querySelectorAll('.tool-card.running').forEach(card => {
-          card.classList.remove('running');
-          card.querySelector('.tool-status').innerHTML = ICONS.cross;
+          setToolState(card, 'interrupted');
         });
         renderQueue([], []);
         saveState();

@@ -148,7 +148,9 @@
     "watch": "tsc -watch -p ./ --noEmit",
     "build": "bun build ./src/extension.ts --outdir ./out --target node --format esm --external vscode --sourcemap=linked",
     "build:vendor": "bun build ./media/vendor-entry.js --outfile ./media/vendor.js --format iife --minify",
-    "screenshots": "bun run __tests__/screenshots/capture.ts"
+    "screenshots": "bun run __tests__/screenshots/capture.ts",
+    "test": "bun test ./__tests__/tool-events.test.ts",
+    "test:webview": "browser-harness < ./__tests__/tool-states.py"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

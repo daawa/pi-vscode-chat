@@ -23,6 +23,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.pi.on('event', this.onPiEvent.bind(this));
     this.pi.on('exit', (code: number | null, signal: string | null, stderr?: string) => {
       this.setStreaming(false);
+      this.postMessage({ type: 'agentEnd' });
       const detail = stderr ? `: ${stderr}` : '';
       this.postMessage({ type: 'error', message: `pi process exited (code=${code}${detail}). Check "piChat.piPath" or restart the window.` });
     });
@@ -463,6 +464,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleToolEnd(event: any): Promise<void> {
+    const outputText = (event.result?.content || [])
+      .map((c: any) => c.text || '')
+      .join('');
+
+    // Publish the outcome before any async edit/diff work. agent_end can arrive
+    // while that work is pending and must not mark a completed tool interrupted.
+    this.postMessage({
+      type: 'toolEnd',
+      messageId: 'current',
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      isError: event.isError,
+      output: outputText.slice(0, 20000),
+    });
+
     const diff = event.result?.details?.diff || event.result?.details?.patch;
 
     // If this was an edit-like tool, record it for accept/revert
@@ -494,13 +510,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    let outputText = '';
-    if (event.result?.content) {
-      outputText = event.result.content
-        .map((c: any) => c.text || '')
-        .join('');
-    }
-
     // For edit-like tools, include the full file content to compute diff
     let fileContent = '';
     if (editTools.has(event.toolName) && !event.isError && relFilePath) {
@@ -515,17 +524,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    this.postMessage({
-      type: 'toolEnd',
-      messageId: 'current',
-      toolCallId: event.toolCallId,
-      toolName: event.toolName,
-      isError: event.isError,
-      diff: computedDiff,
-      output: outputText.slice(0, 20000),
-      fileContent,
-      filePath: relFilePath,
-    });
+    if (computedDiff && relFilePath && !event.isError) {
+      this.postMessage({
+        type: 'toolDiff',
+        toolCallId: event.toolCallId,
+        diff: computedDiff,
+        fileContent,
+        filePath: relFilePath,
+      });
+    }
   }
 
   private handleExtensionUi(request: ExtensionUiRequest): void {
