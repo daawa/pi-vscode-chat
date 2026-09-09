@@ -7,7 +7,6 @@
     messageIdCounter: 0,
     currentMessageId: null,
     accumulatedText: '',
-    messages: [],
     style: 'custom',
   };
 
@@ -47,11 +46,16 @@
 
   const saved = vscode.getState();
   if (saved) state = { ...state, ...saved, isStreaming: false };
+  // Messages are re-rendered from the authoritative session (loadHistory) on
+  // startup. Never restore a persisted HTML snapshot.
+  state.currentMessageId = null;
+  state.accumulatedText = '';
 
   const $ = (id) => document.getElementById(id);
   const messagesEl = $('messages');
   const inputEl = $('input');
   const sendBtn = $('btn-send');
+  let historyLoading = true;
   const abortBtn = $('btn-abort');
   const modelNameEl = $('model-name');
   const btnNew = $('btn-new');
@@ -67,6 +71,8 @@
   const statusBar = $('status-bar');
   const queueBar = $('queue-bar');
   const changesBar = $('changes-bar');
+  const sessionHeader = $('session-header');
+  const sessionNameEl = $('session-name');
   const sessionsPanel = $('sessions-panel');
   const sessionsList = $('sessions-list');
   const btnCloseSessions = $('btn-close-sessions');
@@ -325,31 +331,13 @@
     if (_saveTimer) return; // debounce — skip if already pending
     _saveTimer = setTimeout(() => {
       _saveTimer = null;
-      state.messages = [];
-      messagesEl.querySelectorAll('.message').forEach(el => {
-        const role = el.classList.contains('user') ? 'user' : 'assistant';
-        const contentEl = el.querySelector('.message-content');
-        if (contentEl) state.messages.push({ role, html: contentEl.innerHTML });
-      });
-      vscode.setState(state);
+      vscode.setState({ style: state.style });
     }, 100);
   }
 
   function restoreState() {
-    if (state.messages && state.messages.length > 0) {
-      messagesEl.innerHTML = '';
-      state.messages.forEach(m => {
-        const msgEl = createElement('div', `message ${m.role}`);
-        if (m.role === 'assistant') {
-          msgEl.appendChild(createElement('div', 'message-header', `${ICONS.sparkle}<span>Pi</span>`));
-        }
-        msgEl.appendChild(createElement('div', 'message-content', m.html));
-        messagesEl.appendChild(msgEl);
-      });
-      scrollToBottom(true);
-    } else {
-      renderWelcome();
-    }
+    // The conversation comes from loadHistory(); before it arrives show welcome.
+    renderWelcome();
   }
 
   // ── Thinking ──
@@ -642,6 +630,7 @@
     messagesEl.innerHTML = '';
     state.currentMessageId = null;
     const toolCards = {};
+    const EDIT_TOOLS = new Set(['edit', 'write', 'multi-edit']);
 
     messages.forEach((m) => {
       if (!m || !m.role) return;
@@ -684,11 +673,12 @@
               </div>`;
             setToolState(card, 'unknown');
             contentEl.appendChild(card);
-            toolCards[item.id] = card;
+            toolCards[item.id] = { card, name: item.name, args: item.arguments };
           }
         });
       } else if (m.role === 'toolResult' && toolCards[m.toolCallId]) {
-        const card = toolCards[m.toolCallId];
+        const entry = toolCards[m.toolCallId];
+        const card = entry.card;
         setToolState(card, m.isError ? 'error' : 'done');
         const text = (m.content || []).map(c => c.text || '').join('');
         if (text) {
@@ -696,6 +686,29 @@
           out.classList.remove('hidden');
           out.querySelector('code').textContent = cleanAnsi(text).slice(0, 8000);
         }
+        const diff = m.details?.diff || m.details?.patch;
+        const relFilePath = entry.args?.path || entry.args?.file_path || entry.args?.filePath;
+        if (!m.isError && diff && relFilePath && EDIT_TOOLS.has(entry.name)) {
+          renderInlineDiff(card, relFilePath, '', String(diff));
+        }
+      } else if (m.role === 'compactionSummary' || m.role === 'branchSummary') {
+        const isCompaction = m.role === 'compactionSummary';
+        const msgEl = createElement('div', 'message assistant');
+        msgEl.appendChild(createElement('div', 'message-header', `${ICONS.sparkle}<span>Pi</span>`));
+        const contentEl = createElement('div', 'message-content');
+        const card = createElement('details', 'tool-card summary-card');
+        card.open = true;
+        card.innerHTML = `
+          <summary>
+            <span class="tool-icon">${ICONS.check}</span>
+            <span class="tool-name">${escapeHtml(isCompaction ? 'Context compacted' : 'Branch summary')}</span>
+            ${ICONS.chevron}
+          </summary>
+          <div class="tool-body"><div class="summary-text"></div></div>`;
+        renderMarkdown(card.querySelector('.summary-text'), m.summary || '');
+        contentEl.appendChild(card);
+        msgEl.appendChild(contentEl);
+        messagesEl.appendChild(msgEl);
       }
     });
     if (!messagesEl.querySelector('.message')) renderWelcome();
@@ -783,6 +796,7 @@
   // Run a pi extension command silently (no chat bubble). The extension
   // updates its own status afterwards, which refreshes the chip.
   function runCommand(cmd) {
+    if (historyLoading) return;
     vscode.postMessage({ type: 'runCommand', command: cmd });
   }
 
@@ -1131,10 +1145,21 @@
     document.body.classList.toggle('streaming', isStreaming);
     abortBtn.classList.toggle('hidden', !isStreaming);
     sendBtn.classList.toggle('hidden', isStreaming && !inputEl.value.trim());
-    sendBtn.disabled = !inputEl.value.trim();
-    inputEl.placeholder = isStreaming
-      ? 'Steer the agent — Enter to send, Esc to stop'
-      : 'Ask Pi — @ for files, / for commands';
+    sendBtn.disabled = historyLoading || !inputEl.value.trim();
+    inputEl.readOnly = historyLoading;
+    inputEl.placeholder = historyLoading
+      ? 'Loading session history…'
+      : isStreaming
+        ? 'Steer the agent — Enter to send, Esc to stop'
+        : 'Ask Pi — @ for files, / for commands';
+  }
+
+  // Session identity always comes from live RPC state, never persisted webview HTML.
+  function renderSession(name, id) {
+    const label = name || id || '';
+    sessionNameEl.textContent = label;
+    sessionNameEl.title = name && id ? `${name}\nSession ID: ${id}` : label;
+    sessionHeader.classList.toggle('hidden', !label);
   }
 
   // ── Message routing ──
@@ -1143,6 +1168,7 @@
     const msg = event.data;
     switch (msg.type) {
       case 'init':
+        renderSession(msg.sessionName, msg.sessionId);
         if (msg.model) {
           const short = msg.model.split('/').pop();
           modelNameEl.textContent = short.length > 24 ? short.slice(0, 24) + '…' : short;
@@ -1171,12 +1197,18 @@
         renderHistory(msg.messages || []);
         break;
 
+      case 'historyLoading':
+        historyLoading = msg.loading;
+        updateStreamingState(state.isStreaming);
+        break;
+
       case 'sessionsList':
         sessionsList.innerHTML = '';
         if (msg.sessions && msg.sessions.length > 0) {
           sessionsPanel.classList.remove('hidden');
           msg.sessions.forEach(sess => {
             const item = createElement('div', 'session-item');
+            item.title = sess.title;
             item.innerHTML = `
               <div class="session-item-title">${escapeHtml(sess.title)}</div>
               <div class="session-item-date">${escapeHtml(sess.date)}</div>`;
@@ -1290,6 +1322,7 @@
       }
 
       case 'sessionCleared':
+        renderSession();
         messagesEl.innerHTML = '';
         widgetsContainer.innerHTML = '';
         widgetsContainer.classList.add('hidden');
@@ -1300,9 +1333,9 @@
         renderTeamGrid();
         renderChangesBar([]);
         renderQueue([], []);
-        state.messages = [];
         state.currentMessageId = null;
-        vscode.setState(state);
+        state.accumulatedText = '';
+        saveState();
         renderWelcome();
         break;
 
@@ -1351,6 +1384,7 @@
   // ── Send ──
 
   function sendMessage() {
+    if (historyLoading) return;
     const text = inputEl.value.trim();
     if (!text) return;
 
@@ -1393,7 +1427,7 @@
       inputEl.style.height = 'auto';
       inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
     }
-    sendBtn.disabled = !v.trim();
+    sendBtn.disabled = historyLoading || !v.trim();
     if (state.isStreaming) {
       sendBtn.classList.toggle('hidden', !v.trim());
     }
@@ -1615,5 +1649,6 @@
 
   applyStyle(state.style);
   restoreState();
+  updateStreamingState(false);
   vscode.postMessage({ type: 'ready' });
 })();

@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 
+/** workspaceState key for the session file to resume on window reload */
+export const LAST_SESSION_FILE_STATE_KEY = 'piChat.lastSessionFile';
+
 // ── RPC Message Types ──
 
 export type RpcCommand = Record<string, any> & { type: string; id?: string };
@@ -180,12 +183,13 @@ export type WebviewMessage =
   | { type: 'extensionUiResponse'; id: string; value?: string; confirmed?: boolean; cancelled?: boolean };
 
 export type WebviewOutMessage =
-  | { type: 'init'; model: string; modelReasoning: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string }
+  | { type: 'init'; model: string; modelReasoning: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
   | { type: 'commands'; commands: PiCommandInfo[] }
   | { type: 'styleSelected'; style: ChatStyle }
   | { type: 'stats'; stats: SessionStats | null }
   | { type: 'addFileAttachment'; name: string; path: string }
   | { type: 'loadHistory'; messages: any[] }
+  | { type: 'historyLoading'; loading: boolean }
   | { type: 'sessionsList'; sessions: any[] }
   | { type: 'agentStart' }
   | { type: 'agentEnd' }

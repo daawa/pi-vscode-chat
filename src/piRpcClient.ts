@@ -225,8 +225,8 @@ export class PiRpcClient extends EventEmitter {
   /** Get all messages in the active conversation */
   async getMessages(): Promise<any[]> {
     const resp = await this.send({ type: 'get_messages' });
-    if (resp.success && resp.data?.messages) return resp.data.messages;
-    return [];
+    if (resp.success && Array.isArray(resp.data?.messages)) return resp.data.messages;
+    throw new Error(resp.error || 'Invalid get_messages response');
   }
 
   /** Get available commands (extensions, prompt templates, skills) */

@@ -62,6 +62,29 @@ body {
 
 button { font-family: var(--font); }
 
+/* ══ Current session ══ */
+
+#session-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.session-label { color: var(--text-dim); flex-shrink: 0; }
+#session-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  user-select: text;
+}
+
 /* ══ Messages ══ */
 
 #messages {
