@@ -73,6 +73,7 @@
   const changesBar = $('changes-bar');
   const sessionHeader = $('session-header');
   const sessionNameEl = $('session-name');
+  const sessionIdEl = $('session-id');
   const sessionsPanel = $('sessions-panel');
   const sessionsList = $('sessions-list');
   const btnCloseSessions = $('btn-close-sessions');
@@ -1157,7 +1158,10 @@
   // Session identity always comes from live RPC state, never persisted webview HTML.
   function renderSession(name, id) {
     const label = name || id || '';
-    sessionNameEl.textContent = label;
+    sessionNameEl.textContent = name || id || '';
+    const showId = !!(name && id);
+    sessionIdEl.textContent = id || '';
+    sessionIdEl.classList.toggle('hidden', !showId);
     sessionNameEl.title = name && id ? `${name}\nSession ID: ${id}` : label;
     sessionHeader.classList.toggle('hidden', !label);
   }
