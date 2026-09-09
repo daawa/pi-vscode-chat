@@ -362,6 +362,9 @@ pre:hover .code-copy { opacity: 1; }
 .tool-status { display: flex; align-items: center; flex-shrink: 0; width: 13px; }
 .tool-card.done .tool-status { color: var(--success); }
 .tool-card.error .tool-status { color: var(--error); }
+.tool-card.interrupted .tool-status { color: var(--warning); }
+.tool-card.unknown .tool-status { color: var(--text-dim); }
+.tool-card.interrupted { border-color: var(--warning); }
 
 .tool-icon { display: flex; align-items: center; color: var(--text-dim); flex-shrink: 0; }
 .tool-name { font-weight: 600; flex-shrink: 0; }
@@ -818,14 +821,17 @@ pre:hover .code-copy { opacity: 1; }
 /* Footer */
 #footer-bar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   justify-content: space-between;
   align-items: center;
   padding: 4px 2px 2px;
   font-size: 10.5px;
   color: var(--text-dim);
 }
-#footer-left { display: flex; gap: 2px; }
+#footer-left { display: flex; flex-wrap: wrap; gap: 2px; }
 .footer-link {
+  white-space: nowrap;
   background: none;
   border: none;
   color: var(--text-dim);

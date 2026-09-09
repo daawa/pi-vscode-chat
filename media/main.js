@@ -8,6 +8,7 @@
     currentMessageId: null,
     accumulatedText: '',
     messages: [],
+    style: 'custom',
   };
 
   const ICONS = {
@@ -60,6 +61,8 @@
   const btnAttach = $('btn-attach');
   const btnKey = $('btn-key');
   const btnKeys = $('btn-keys');
+  const btnStyle = $('btn-style');
+  const styleLink = $('chat-style');
   const widgetsContainer = $('widgets-container');
   const statusBar = $('status-bar');
   const queueBar = $('queue-bar');
@@ -95,6 +98,20 @@
     if (className) el.className = className;
     if (html) el.innerHTML = html;
     return el;
+  }
+
+  // ── Chat style ──
+
+  function applyStyle(style) {
+    // Only use bundled stylesheet URLs supplied by the extension host.
+    state.style = style === 'default' ? 'default' : 'custom';
+    const uri = styleLink?.dataset[state.style];
+    if (uri && styleLink.getAttribute('href') !== uri) styleLink.href = uri;
+    if (btnStyle) {
+      const label = state.style === 'default' ? 'Default' : 'Custom';
+      btnStyle.title = `Chat style: ${label} — select style`;
+      btnStyle.setAttribute('aria-label', `Select chat style (current: ${label})`);
+    }
   }
 
   // ── File reference linkification ──
@@ -1141,6 +1158,11 @@
         piCommands = msg.commands || [];
         break;
 
+      case 'styleSelected':
+        applyStyle(msg.style);
+        saveState();
+        break;
+
       case 'stats':
         renderStats(msg.stats);
         break;
@@ -1436,6 +1458,9 @@
   btnAttach.addEventListener('click', () => vscode.postMessage({ type: 'selectFileToAttach' }));
   if (btnKey) btnKey.addEventListener('click', () => vscode.postMessage({ type: 'configureProvider' }));
   if (btnKeys) btnKeys.addEventListener('click', () => vscode.postMessage({ type: 'configureProvider' }));
+  if (btnStyle) btnStyle.addEventListener('click', () => {
+    vscode.postMessage({ type: 'selectStyle', currentStyle: state.style });
+  });
 
   // ── Paste image ──
 
@@ -1588,6 +1613,7 @@
     }
   });
 
+  applyStyle(state.style);
   restoreState();
   vscode.postMessage({ type: 'ready' });
 })();

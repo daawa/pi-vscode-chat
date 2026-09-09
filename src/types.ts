@@ -154,6 +154,8 @@ export type ExtensionUiRequest =
 
 // ── Webview Messages (extension ↔ webview) ──
 
+export type ChatStyle = 'default' | 'custom';
+
 export type WebviewMessage =
   | { type: 'prompt'; text: string; images?: { data: string; mime: string }[]; streaming?: boolean }
   | { type: 'abort' }
@@ -165,6 +167,7 @@ export type WebviewMessage =
   | { type: 'openFile'; path: string; line?: number; column?: number }
   | { type: 'selectModel' }
   | { type: 'configureProvider' }
+  | { type: 'selectStyle'; currentStyle: ChatStyle }
   | { type: 'setThinkingLevel'; level: string }
   | { type: 'newSession' }
   | { type: 'reloadExtensions' }
@@ -179,6 +182,7 @@ export type WebviewMessage =
 export type WebviewOutMessage =
   | { type: 'init'; model: string; modelReasoning: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string }
   | { type: 'commands'; commands: PiCommandInfo[] }
+  | { type: 'styleSelected'; style: ChatStyle }
   | { type: 'stats'; stats: SessionStats | null }
   | { type: 'addFileAttachment'; name: string; path: string }
   | { type: 'loadHistory'; messages: any[] }
