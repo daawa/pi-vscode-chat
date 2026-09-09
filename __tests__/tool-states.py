@@ -40,11 +40,12 @@ def load_fixture(saved_state=None):
       document.documentElement.style.setProperty('--text-dim', '#64748b');
     ''')
     # Keep each CDP request below the browser-harness daemon's line-size limit.
-    source = (root / 'media/main.js').read_text()
-    js('window.testMainSource = "";')
-    for offset in range(0, len(source), 6000):
-        js('window.testMainSource += ' + json.dumps(source[offset:offset + 6000]))
-    js('(0, eval)(window.testMainSource); delete window.testMainSource;')
+    for filename in ['vendor.js', 'main.js']:
+        source = (root / 'media' / filename).read_text()
+        js('window.testMainSource = "";')
+        for offset in range(0, len(source), 6000):
+            js('window.testMainSource += ' + json.dumps(source[offset:offset + 6000]))
+        js('(0, eval)(window.testMainSource); delete window.testMainSource;')
     js('''new Promise((resolve, reject) => {
       const link = document.getElementById('chat-style');
       if (link.sheet) return resolve();
@@ -230,6 +231,7 @@ try:
         start('edit'); end('edit', false); send({ type: 'agentEnd' });
         diff('edit'); check('edit', 'done');
         assert(card('edit').querySelector('.tool-diff'), 'Missing late diff');
+        assert(card('edit').querySelector('.d2h-diff-table'), 'Bundled diff renderer produced no table');
         end('edit', true); diff('edit'); check('edit', 'error');
         assert(!card('edit').querySelector('.tool-diff'), 'Failed tool retained a success diff');
       });
@@ -241,13 +243,38 @@ try:
         assert(!card('orphan'), 'Diff resurrected a cleared card');
       });
 
+      test('edit review actions remain visible outside collapsed tools and update in place', () => {
+        start('review'); end('review', false); diff('review');
+        const record = {type: 'editRecorded', editId: 'review', filePath: '/workspace/example.txt'};
+        send(record); send(record);
+        send({type: 'editsSummary', pending: [{editId: 'review', filePath: record.filePath}]});
+        assert(document.querySelectorAll('#edit-review').length === 1, 'Repeated edit duplicated review actions');
+        const review = document.getElementById('edit-review');
+        assert(!card('review').open && review.getBoundingClientRect().height > 0, 'Collapsed tool hides review actions');
+        for (const action of ['showDiff', 'acceptEdit', 'revertEdit']) {
+          review.querySelector(`[data-action="${action}"]`).click();
+          assert(testPostedMessages.at(-1).type === action && testPostedMessages.at(-1).editId === 'review', 'Review action not sent');
+        }
+        assert(!document.getElementById('changes-bar').classList.contains('hidden'), 'Changes bar missing');
+        send({type: 'editAccepted', editId: 'review'});
+        assert(review.textContent.includes('Kept'), 'Keep did not settle review card');
+        send({type: 'editsSummary', pending: []});
+        assert(document.getElementById('changes-bar').classList.contains('hidden'), 'Empty changes bar retained');
+      });
+
+      test('Pi display diffs remain readable when no unified patch is available', () => {
+        start('raw'); end('raw', false);
+        send({type: 'toolDiff', toolCallId: 'raw', filePath: 'example.txt', diff: '-1 old\\n+1 new'});
+        assert(card('raw').querySelector('.diff-content code').textContent.includes('-1 old'), 'Display diff lost in renderer');
+      });
+
       return { passed, errors: testErrors };
     })()''')
-    assert isinstance(results, dict) and len(results.get('passed', [])) == 12, results
+    assert isinstance(results, dict) and len(results.get('passed', [])) == 14, results
     assert not results['errors'], results['errors']
     for name in results['passed']:
         print('PASS:', name)
-    print('12 session/tool-state regression tests passed')
+    print('14 session/tool-state regression tests passed')
 
     # Use a real browser click to exercise the footer action, including layout.
     cdp('Emulation.setDeviceMetricsOverride', width=360, height=800, deviceScaleFactor=1, mobile=False)
@@ -341,6 +368,6 @@ try:
         print('PASS: Saved style is restored in a fresh webview')
     finally:
         cdp('Target.closeTarget', targetId=restored_target)
-    print('20 webview regression tests passed')
+    print('22 webview regression tests passed')
 finally:
     cdp('Target.closeTarget', targetId=target)

@@ -63,6 +63,7 @@ code --install-extension iqbalabiyoga.pi-vscode-chat
 - **Slash commands** — `/` autocompletes every pi command, skill, prompt template on your machine (rtk, caveman, team-init, etc.).
 - **`@` file search** — inline fuzzy file search: `@` + filename to reference workspace files.
 - **Edit tracking** — every agent file edit gets Diff / Keep / Undo. A "Keep all / Undo all" changes bar lets you batch-accept or batch-revert edits from the current session.
+  Review buttons appear in a file card below the tool output, even when the tool is collapsed. Expand the tool and its Changes section for an inline preview, or click Diff to open the VS Code diff editor. Repeated edits to a pending file share one review card; Keep accepts its current contents, and Undo restores the contents from before its pending changes (or removes a newly created file). Undo is available only while the original in-memory snapshot exists; edits loaded from a previous VS Code run cannot regain Keep / Undo from chat history alone.
 - **Session management** — persistent JSONL sessions; browse and resume previous pi sessions per workspace. The chat header shows the current session name (or ID if unnamed); hover for the full name and ID. Names refresh after `/name` when provided by a host extension such as `pi-deepseek-theme`.
 - **Live stats** — context usage %, session cost, token totals in the footer.
 - **Model & thinking level** — QuickPick to switch models; cycle reasoning effort (off → minimal → low → medium → high → xhigh) from the toolbar.

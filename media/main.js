@@ -512,10 +512,10 @@
 
       // Try to parse diff as unified diff format
       const diff2html = window.Diff2Html;
-      if (diff2html) {
+      if (diff2html && diff2html.parse(diffText).length) {
         // Normalize line endings
         const normalizedDiff = diffText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        const html = diff2html.Diff2Html.html(normalizedDiff, {
+        const html = diff2html.html(normalizedDiff, {
           inputFormat: 'diff',
           outputFormat: 'side-by-side',
           showFiles: false,
@@ -529,7 +529,7 @@
       }
     } catch (e) {
       console.error('Failed to render diff:', e);
-      diffContent.innerHTML = `<div class="diff-error">Could not render diff: ${escapeHtml(String(e))}</div>`;
+      diffContent.innerHTML = `<pre><code class="language-diff">${escapeHtml(diffText)}</code></pre>`;
     }
 
     body.appendChild(diffContainer);
@@ -548,6 +548,8 @@
   // ── Edit cards & changes bar ──
 
   function addEditCard(filePath, id) {
+    // Repeated edits to a pending file update its existing review card.
+    if (document.getElementById(`edit-${id}`)) return;
     const msg = getOrCreateMessage('assistant');
     const content = msg.querySelector('.message-content');
     const fileName = filePath.split(/[\\/]/).pop();

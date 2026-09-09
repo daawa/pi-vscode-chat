@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { createPatch } from 'diff';
 import type { EditRecord } from './types.js';
 
 /**
@@ -7,12 +8,12 @@ import type { EditRecord } from './types.js';
  * 
  * Flow:
  * 1. On agent_start: snapshot all open workspace files
- * 2. On edit tool result: record the change, store diff
- * 3. User can revert → restore from snapshot
- * 4. User can accept → mark as accepted
+ * 2. On edit tool start: snapshot unopened files before reading the result
+ * 3. On edit tool result: update the pending file change and unified diff
+ * 4. User can revert → restore from snapshot, or accept → keep current contents
  */
 export class EditManager {
-  private snapshots = new Map<string, string>();
+  private snapshots = new Map<string, Promise<string | null>>();
   private edits = new Map<string, EditRecord>();
   private onDidChangeEdits: vscode.EventEmitter<EditRecord> = new vscode.EventEmitter();
 
@@ -30,27 +31,31 @@ export class EditManager {
       if (doc.isUntitled) continue;
       try {
         const content = doc.getText();
-        this.snapshots.set(doc.uri.fsPath, content);
+        this.snapshots.set(doc.uri.fsPath, Promise.resolve(content));
       } catch { /* skip */ }
     }
 
-    // Also snapshot files that are in workspace folders but not open
-    // (lazy — only snapshot on first edit)
+    // Unopened files are captured lazily at tool start.
   }
 
-  /** Lazily snapshot a file if not already tracked */
-  private async ensureSnapshot(filePath: string): Promise<string | null> {
+  /** Start reading at tool start, never after the tool has changed the file. */
+  snapshotFile(filePath: string): Promise<string | null> {
     if (this.snapshots.has(filePath)) {
       return this.snapshots.get(filePath)!;
     }
-    try {
-      const uri = vscode.Uri.file(filePath);
-      const content = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
-      this.snapshots.set(filePath, content);
-      return content;
-    } catch {
-      return null;
-    }
+    const pending = this.getPendingEdits().find(edit => edit.filePath === filePath);
+    const snapshot = pending
+      ? Promise.resolve(pending.originalExists ? pending.originalContent : null)
+      : vscode.workspace.fs.readFile(vscode.Uri.file(filePath)).then(
+        bytes => Buffer.from(bytes).toString('utf8'),
+        err => {
+          if (err.code === 'FileNotFound' || err.code === 'ENOENT') return null;
+          throw err;
+        },
+      );
+    const promise = Promise.resolve(snapshot);
+    this.snapshots.set(filePath, promise);
+    return promise;
   }
 
   /** Record an edit from tool_execution_end */
@@ -59,15 +64,21 @@ export class EditManager {
     newContent: string,
     diff: string,
   ): Promise<EditRecord> {
-    const originalContent = await this.ensureSnapshot(filePath);
-    if (originalContent === null) {
+    if (!this.snapshots.has(filePath)) {
       throw new Error(`Cannot snapshot file: ${filePath}`);
     }
+    const snapshot = await this.snapshots.get(filePath)!;
+    const pending = this.getPendingEdits().find(edit => edit.filePath === filePath);
+    const originalContent = pending?.originalContent ?? snapshot ?? '';
+    const originalExists = pending?.originalExists ?? snapshot !== null;
+    // Pi's details.diff may be a line-numbered display, not a unified patch.
+    diff = createPatch(path.basename(filePath), originalContent, newContent);
 
     const record: EditRecord = {
-      id: `edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: pending?.id ?? `edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       filePath,
       originalContent,
+      originalExists,
       newContent,
       diff,
       timestamp: Date.now(),
@@ -86,10 +97,12 @@ export class EditManager {
 
     try {
       const uri = vscode.Uri.file(record.filePath);
-      await vscode.workspace.fs.writeFile(
-        uri,
-        Buffer.from(record.originalContent, 'utf8'),
-      );
+      if (record.originalExists) {
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(record.originalContent, 'utf8'));
+      } else {
+        await vscode.workspace.fs.delete(uri);
+      }
+      this.snapshots.delete(record.filePath);
       record.status = 'reverted';
       this.onDidChangeEdits.fire(record);
       return true;
@@ -104,6 +117,7 @@ export class EditManager {
     const record = this.edits.get(editId);
     if (!record || record.status !== 'pending') return;
     record.status = 'accepted';
+    this.snapshots.delete(record.filePath);
     this.onDidChangeEdits.fire(record);
   }
 
