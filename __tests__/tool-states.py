@@ -7,6 +7,7 @@ No Pi process is started and no workspace files or real chat state are changed.
 
 import json
 import re
+import time
 from pathlib import Path
 
 root = Path.cwd()
@@ -78,6 +79,7 @@ try:
       assert(document.getElementById('messages').textContent.includes('Earlier context'), 'History was not rendered');
       input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
       assert(submissions().length === 1 && submissions()[0].text === 'Preserved draft', 'Ready composer did not submit draft');
+      send({type: 'promptResult', submissionId: submissions()[0].submissionId, success: true});
 
       send({type: 'historyLoading', loading: true});
       send({type: 'setInputText', text: 'Retry draft'});
@@ -87,6 +89,7 @@ try:
       assert(document.querySelector('.error-banner').textContent.includes('Failed to load'), 'History failure was not visible');
       button.click();
       assert(submissions().length === 2 && submissions()[1].text === 'Retry draft', 'Cannot submit after visible failure');
+      send({type: 'promptResult', submissionId: submissions()[1].submissionId, success: true});
     })()''')
     print('PASS: Startup blocks Enter, Send and commands until history is rendered, preserving the draft')
     print('PASS: A visible history failure unlocks the composer')
@@ -276,6 +279,26 @@ try:
         print('PASS:', name)
     print('14 session/tool-state regression tests passed')
 
+    source = (root / '__tests__/image-input.js').read_text()
+    js('window.testImageTests = "";')
+    for offset in range(0, len(source), 6000):
+        js('window.testImageTests += ' + json.dumps(source[offset:offset + 6000]))
+    # Hidden tabs can throttle timer-based FileReader/decode waits. Keep each
+    # harness request short rather than awaiting the whole suite in one call.
+    js('void (0, eval)(testImageTests).then(value => window.imageTestDone = value, err => window.imageTestFailure = String(err));')
+    deadline = time.monotonic() + 90
+    while True:
+        result = js('({done: window.imageTestDone, error: window.imageTestFailure, progress: window.imageTestProgress})')
+        assert not result.get('error'), result
+        if result.get('done') is not None:
+            break
+        assert time.monotonic() < deadline, result
+        time.sleep(0.25)
+    image_results = result['done']
+    assert len(image_results) == 11, image_results
+    for name in image_results:
+        print('PASS:', name)
+
     # Use a real browser click to exercise the footer action, including layout.
     cdp('Emulation.setDeviceMetricsOverride', width=360, height=800, deviceScaleFactor=1, mobile=False)
     button = next(node for node in cdp('Accessibility.getFullAXTree')['nodes']
@@ -368,6 +391,6 @@ try:
         print('PASS: Saved style is restored in a fresh webview')
     finally:
         cdp('Target.closeTarget', targetId=restored_target)
-    print('22 webview regression tests passed')
+    print('33 webview regression tests passed')
 finally:
     cdp('Target.closeTarget', targetId=target)

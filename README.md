@@ -68,8 +68,24 @@ code --install-extension iqbalabiyoga.pi-vscode-chat
 - **Live stats** — context usage %, session cost, token totals in the footer.
 - **Model & thinking level** — QuickPick to switch models; cycle reasoning effort (off → minimal → low → medium → high → xhigh) from the toolbar.
 - **Extension status chips** — pi extensions surface as interactive chips: toggle rtk on/off, change caveman compression level, open the agents-team panel (Init / Result / Stop).
-- **Attachments** — VS Code file picker, image paste from clipboard, drag & drop from Explorer or Finder.
+- **Attachments** — image-aware file picker, clipboard paste, and Explorer/Finder drag & drop; removable thumbnails, image-only prompts, and images in live/restored chat history.
 - **Selectable chat styles** — click **Style** to the right of **Keys** in the footer. Choose **Default** for VS Code theme colors (light, dark, and high-contrast), or **Custom** for tinted tool results and light blue code blocks. The choice is saved across chat sessions and webview reloads. No CDN assets. Strict Content Security Policy.
+
+---
+
+## Image input
+
+1. Select a model that supports images using the model picker.
+2. Click the paperclip to choose an image, drop one from Explorer/Finder, or focus the chat input and paste a copied screenshot with **Ctrl+V / Cmd+V**.
+3. Optionally add text, then press Enter. Image-only prompts and steering messages are supported. Remove an attachment with its **✕** button.
+
+Supported formats: **PNG, JPEG, GIF, WebP**. Limits: **4 images**, **4 MiB per image**, **12 MiB total**, **8000 pixels per side**, and **32 megapixels per image**. Resize or convert larger/unsupported images before attaching; individual AI providers may impose stricter limits. Images are not automatically resized.
+
+The composer waits for attachment reads and RPC acceptance before clearing the draft. If Pi rejects a prompt, its text and images remain available for retry. Image input is blocked for text-only models. Extension slash commands cannot consume image attachments; use a regular prompt, skill, or prompt template instead.
+
+Images are sent as base64 image blocks, not `@path` text. Ordinary file attachments and `@` autocomplete remain path references that the agent can read. Explorer resources retain their VS Code remote URI; clipboard and OS-drop images are read locally in the webview and passed to the extension host. Paste requires actual image clipboard data—if you copied a file icon/path rather than its pixels, use the file picker instead.
+
+Accepted images are stored in Pi's session history and restored with the conversation. Unsent attachments stay in memory and are cleared when changing sessions or reloading the webview. No temporary image files or separate upload service are used.
 
 ---
 
@@ -119,14 +135,14 @@ Everything you type, attach, or that pi reads during execution is sent through p
 - **Chat messages** — your prompts, questions, code requests
 - **Attached files** — files selected via file picker, or dropped/pasted into the chat
 - **Source code** — pi's `read`, `grep`, `find`, `ls` tools read workspace files. pi passes relevant excerpts to the AI provider
-- **Images** — pasted from clipboard or dropped into the webview (converted to base64)
+- **Images** — selected from the file picker, pasted from the clipboard, or dropped into the webview (converted to base64 and sent with your prompt)
 - **Workspace structure** — file paths, directory names, project scaffolding
 
 ### What stays local
 
 - **Edit snapshots** — file snapshots for accept/revert are stored in extension memory only
 - **Session list** — session files are read from `~/.pi/agent/sessions/*.jsonl` and their titles displayed; the raw session files are never sent externally
-- **VS Code state** — the webview's rendered message HTML is persisted via `vscode.setState()` (VS Code's Extension Storage); this stays on disk locally unless you use Settings Sync
+- **VS Code state** — only the selected chat style is persisted via `vscode.setState()`. Chat history, including accepted image blocks, is restored from Pi sessions; unsent image drafts are not saved to VS Code state.
 
 ### Security recommendations
 
@@ -197,6 +213,8 @@ bun run compile                # Full build: vendor + extension + type check
 bun run build                  # Extension bundle only (fast iteration)
 bun run build:vendor           # Vendor bundle only (marked + hljs)
 bun run watch                  # tsc -watch for type checking only
+bun run test                   # Unit/bridge regression tests (no Pi/provider needed)
+bun run test:webview           # Real webview tests via browser-harness + Chrome (mocked VS Code API)
 ```
 
 Press **F5** to launch the Extension Development Host (`.vscode/launch.json` runs `npm: compile` first).
@@ -209,6 +227,7 @@ src/
 ├── piRpcClient.ts            # Child process manager, JSONL protocol
 ├── chatSidebarProvider.ts    # WebviewViewProvider, event bridge
 ├── editManager.ts            # File snapshots, accept/revert tracking
+├── imageAttachments.ts       # Image format/MIME, dimensions and payload limits
 ├── types.ts                  # All message shapes (RPC, webview, events)
 media/
 ├── main.js                   # Webview frontend (vanilla JS)

@@ -83,12 +83,22 @@
   const footerStats = $('footer-stats');
 
   let attachments = [];
+  const pendingAttachmentReads = new Set();
+  let pendingSubmission = null;
+  let modelSupportsImages = false;
+  // Keep aligned with src/imageAttachments.ts; the host revalidates all payloads.
+  const IMAGE_LIMITS = { count: 4, bytes: 4 * 1024 * 1024, totalBytes: 12 * 1024 * 1024, dimension: 8000, pixels: 32000000 };
+  const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
   let activeStatuses = {};
   let piCommands = [];
   let currentModelReasoning = false;
   const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
   // ── Utilities ──
+
+  function uniqueId() {
+    return crypto.getRandomValues(new Uint32Array(4)).join('-');
+  }
 
   function cleanAnsi(text) {
     if (!text) return '';
@@ -313,11 +323,37 @@
     return msg;
   }
 
-  function addUserMessage(text, queued) {
+  function imagePreview(image, className) {
+    const mime = image.mime || image.mimeType;
+    if (!IMAGE_MIMES.has(mime) || typeof image.data !== 'string' || image.data.length > 4 * Math.ceil(IMAGE_LIMITS.bytes / 3)) return null;
+    const img = document.createElement('img');
+    img.className = className;
+    img.alt = image.name || 'Attached image';
+    img.title = img.alt;
+    img.loading = 'lazy';
+    img.src = `data:${mime};base64,${image.data}`;
+    return img;
+  }
+
+  function addUserMessage(text, queued, images = [], submissionId) {
     clearWelcome();
     const msg = createElement('div', `message user${queued ? ' queued' : ''}`);
     const content = createElement('div', 'message-content');
     content.textContent = text;
+    if (submissionId) msg.dataset.submissionId = submissionId;
+    if (images.length) {
+      const gallery = createElement('div', 'message-images');
+      images.forEach(image => {
+        const img = imagePreview(image, 'message-image');
+        if (img) gallery.appendChild(img);
+        else {
+          const fallback = createElement('div', 'image-preview-unavailable');
+          fallback.textContent = 'Image preview unavailable (unsupported format or size)';
+          gallery.appendChild(fallback);
+        }
+      });
+      content.appendChild(gallery);
+    }
     msg.appendChild(content);
     if (queued) {
       msg.appendChild(createElement('div', 'queued-tag', 'queued'));
@@ -638,8 +674,9 @@
     messages.forEach((m) => {
       if (!m || !m.role) return;
       if (m.role === 'user') {
-        const text = Array.isArray(m.content) ? m.content.map(c => c.text || '').join('') : String(m.content ?? '');
-        if (text.trim()) addUserMessage(text.trim());
+        const text = Array.isArray(m.content) ? m.content.filter(c => c.type === 'text').map(c => c.text || '').join('') : String(m.content ?? '');
+        const images = Array.isArray(m.content) ? m.content.filter(c => c.type === 'image') : [];
+        if (text.trim() || images.length) addUserMessage(text.trim(), false, images);
       } else if (m.role === 'assistant') {
         const msgEl = createElement('div', 'message assistant');
         msgEl.appendChild(createElement('div', 'message-header', `${ICONS.sparkle}<span>Pi</span>`));
@@ -799,7 +836,7 @@
   // Run a pi extension command silently (no chat bubble). The extension
   // updates its own status afterwards, which refreshes the chip.
   function runCommand(cmd) {
-    if (historyLoading) return;
+    if (historyLoading || pendingSubmission) return;
     vscode.postMessage({ type: 'runCommand', command: cmd });
   }
 
@@ -1119,14 +1156,36 @@
 
   // ── Attachments ──
 
+  function showError(message) {
+    clearWelcome();
+    const el = createElement('div', 'error-banner');
+    el.textContent = message;
+    messagesEl.appendChild(el);
+    scrollToBottom(true);
+  }
+
+  function imageBytes(image) {
+    return image.data.length * 3 / 4 - (image.data.endsWith('==') ? 2 : image.data.endsWith('=') ? 1 : 0);
+  }
+
   function addAttachment(file) {
-    if (attachments.some(a => a.path === file.path)) return;
+    if (pendingSubmission) return;
+    file.id ||= file.path || uniqueId();
+    if (attachments.some(a => a.id === file.id)) return;
+    if (file.type === 'image') {
+      const images = attachments.filter(a => a.type === 'image');
+      if (images.length >= IMAGE_LIMITS.count) throw new Error('Attach at most 4 images per message.');
+      if (images.reduce((sum, image) => sum + imageBytes(image), imageBytes(file)) > IMAGE_LIMITS.totalBytes) {
+        throw new Error('Images must total at most 12 MiB per message.');
+      }
+    }
     attachments.push(file);
     renderAttachments();
   }
 
-  function removeAttachment(path) {
-    attachments = attachments.filter(a => a.path !== path);
+  function removeAttachment(id) {
+    if (pendingSubmission) return;
+    attachments = attachments.filter(a => a.id !== id);
     renderAttachments();
   }
 
@@ -1134,11 +1193,133 @@
     const list = $('attachment-list');
     list.innerHTML = '';
     attachments.forEach(att => {
-      const chip = createElement('div', 'attachment-chip');
-      chip.innerHTML = `${ICONS.file}<span title="${escapeHtml(att.path)}">${escapeHtml(att.name)}</span><button title="Remove">✕</button>`;
-      chip.querySelector('button').addEventListener('click', () => removeAttachment(att.path));
+      const chip = createElement('div', `attachment-chip${att.type === 'image' ? ' image-attachment' : ''}`);
+      chip.innerHTML = `${ICONS.file}<span></span><button title="Remove" aria-label="Remove attachment">✕</button>`;
+      const label = chip.querySelector('span');
+      label.textContent = att.name;
+      label.title = att.path || att.name;
+      if (att.type === 'image') {
+        const img = imagePreview(att, 'attachment-thumbnail');
+        if (img) chip.replaceChild(img, chip.firstElementChild);
+      }
+      const remove = chip.querySelector('button');
+      remove.disabled = !!pendingSubmission;
+      remove.addEventListener('click', () => removeAttachment(att.id));
       list.appendChild(chip);
     });
+    updateComposerState();
+  }
+
+  function clearComposer() {
+    pendingAttachmentReads.clear(); // Invalidates late FileReader/file picker results.
+    pendingSubmission = null;
+    attachments = [];
+    inputEl.value = '';
+    inputEl._lastLen = 0;
+    inputEl.style.height = 'auto';
+    renderAttachments();
+    hideAutocomplete();
+  }
+
+  function beginAttachmentRead() {
+    const id = uniqueId();
+    pendingAttachmentReads.add(id);
+    updateComposerState();
+    return id;
+  }
+
+  async function prepareImage(image, requestId) {
+    if (!IMAGE_MIMES.has(image.mime)) throw new Error('Unsupported image format. Use PNG, JPEG, GIF or WebP.');
+    if (!image.data || imageBytes(image) > IMAGE_LIMITS.bytes) throw new Error('Images must be non-empty and at most 4 MiB each.');
+    const preview = imagePreview(image, '');
+    if (!preview) throw new Error('Invalid image.');
+    // Validation uses a detached image: lazy loading would wait forever for it
+    // to enter the viewport. Only message-history thumbnails should be lazy.
+    preview.loading = 'eager';
+    await preview.decode();
+    if (preview.naturalWidth > IMAGE_LIMITS.dimension || preview.naturalHeight > IMAGE_LIMITS.dimension ||
+        preview.naturalWidth * preview.naturalHeight > IMAGE_LIMITS.pixels) {
+      throw new Error('Image exceeds 8000 pixels per side or 32 megapixels. Resize it and retry.');
+    }
+    if (pendingAttachmentReads.has(requestId)) addAttachment(image);
+  }
+
+  async function receiveAttachments(msg) {
+    if (!pendingAttachmentReads.has(msg.requestId)) return;
+    try {
+      for (const attachment of msg.attachments || []) {
+        if (!pendingAttachmentReads.has(msg.requestId)) break;
+        try {
+          if (attachment.type === 'image') await prepareImage(attachment, msg.requestId);
+          else addAttachment(attachment);
+        } catch (err) { if (pendingAttachmentReads.has(msg.requestId)) showError(`Cannot attach ${attachment.name}: ${err}`); }
+      }
+      if (pendingAttachmentReads.has(msg.requestId)) (msg.errors || []).forEach(showError);
+    } finally {
+      pendingAttachmentReads.delete(msg.requestId);
+      updateComposerState();
+    }
+  }
+
+  function readFile(file, asText = false) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Could not read attachment.'));
+      reader.onabort = () => reject(new Error('Attachment read cancelled.'));
+      if (asText) reader.readAsText(file);
+      else reader.readAsDataURL(file);
+    });
+  }
+
+  async function attachImageFile(file) {
+    if (historyLoading || pendingSubmission) return;
+    if (pendingAttachmentReads.size >= IMAGE_LIMITS.count) {
+      showError('Wait for the current attachments to finish loading.');
+      return;
+    }
+    const requestId = beginAttachmentRead();
+    try {
+      if (!file.size || file.size > IMAGE_LIMITS.bytes) throw new Error('Images must be non-empty and at most 4 MiB each.');
+      // Some OS drops omit MIME; infer only a candidate here. The host checks bytes.
+      const extension = file.name.split('.').pop().toLowerCase();
+      const inferredMime = ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' })[extension];
+      const mime = !file.type || file.type === 'application/octet-stream' ? inferredMime : file.type;
+      if (!IMAGE_MIMES.has(mime)) throw new Error('Unsupported image format. Use PNG, JPEG, GIF or WebP.');
+      const dataUrl = await readFile(file);
+      if (!pendingAttachmentReads.has(requestId)) return;
+      await prepareImage({ id: uniqueId(), type: 'image', name: file.name || `pasted-image.${mime.split('/')[1]}`,
+        data: dataUrl.slice(dataUrl.indexOf(',') + 1), mime }, requestId);
+    } catch (err) {
+      if (pendingAttachmentReads.has(requestId)) showError(`Cannot attach image: ${err}`);
+    } finally {
+      pendingAttachmentReads.delete(requestId);
+      updateComposerState();
+    }
+  }
+
+  function canSubmit() {
+    return !historyLoading && !pendingSubmission && pendingAttachmentReads.size === 0 &&
+      (!!inputEl.value.trim() || attachments.length > 0) &&
+      (modelSupportsImages || !attachments.some(a => a.type === 'image'));
+  }
+
+  function updateComposerState() {
+    const hasContent = !!inputEl.value.trim() || attachments.length > 0;
+    const locked = historyLoading || !!pendingSubmission;
+    const unsupported = attachments.some(a => a.type === 'image') && !modelSupportsImages;
+    sendBtn.disabled = !canSubmit();
+    sendBtn.classList.toggle('hidden', state.isStreaming && !hasContent);
+    inputEl.readOnly = locked;
+    btnAttach.disabled = locked;
+    btnNew.disabled = !!pendingSubmission;
+    btnHistory.disabled = !!pendingSubmission;
+    btnModel.disabled = !!pendingSubmission;
+    document.querySelectorAll('.attachment-chip button').forEach(button => { button.disabled = locked; });
+    const status = $('attachment-status');
+    status.textContent = pendingSubmission ? 'Submitting…' : pendingAttachmentReads.size ? 'Reading attachments…' : unsupported
+      ? 'Select an image-capable model to send these attachments.' : '';
+    status.classList.toggle('hidden', !status.textContent);
   }
 
   // ── Streaming state ──
@@ -1147,9 +1328,7 @@
     state.isStreaming = isStreaming;
     document.body.classList.toggle('streaming', isStreaming);
     abortBtn.classList.toggle('hidden', !isStreaming);
-    sendBtn.classList.toggle('hidden', isStreaming && !inputEl.value.trim());
-    sendBtn.disabled = historyLoading || !inputEl.value.trim();
-    inputEl.readOnly = historyLoading;
+    updateComposerState();
     inputEl.placeholder = historyLoading
       ? 'Loading session history…'
       : isStreaming
@@ -1180,6 +1359,7 @@
           modelNameEl.textContent = short.length > 24 ? short.slice(0, 24) + '…' : short;
           modelNameEl.title = msg.model;
         }
+        modelSupportsImages = !!msg.modelSupportsImages;
         currentModelReasoning = !!msg.modelReasoning;
         btnThinking.classList.toggle('hidden', !currentModelReasoning);
         thinkingLevelEl.textContent = msg.thinkingLevel || 'off';
@@ -1231,7 +1411,21 @@
         break;
 
       case 'userMessage':
-        addUserMessage(msg.text, msg.queued);
+        addUserMessage(msg.text, msg.queued, msg.images, msg.submissionId);
+        break;
+
+      case 'promptResult':
+        if (pendingSubmission !== msg.submissionId) break;
+        pendingSubmission = null;
+        if (msg.success) clearComposer();
+        else {
+          document.querySelectorAll('.message.user').forEach(el => {
+            if (el.dataset.submissionId === msg.submissionId) el.remove();
+          });
+          showError(msg.error || 'Prompt rejected. Your draft has been preserved.');
+          updateComposerState();
+        }
+        inputEl.focus();
         break;
 
       case 'textDelta': {
@@ -1328,6 +1522,7 @@
       }
 
       case 'sessionCleared':
+        clearComposer();
         renderSession();
         messagesEl.innerHTML = '';
         widgetsContainer.innerHTML = '';
@@ -1345,8 +1540,12 @@
         renderWelcome();
         break;
 
-      case 'addFileAttachment':
-        addAttachment({ name: msg.name, path: msg.path, type: 'file' });
+      case 'attachmentsSelected':
+        void receiveAttachments(msg);
+        break;
+
+      case 'clearComposer':
+        clearComposer();
         break;
 
       case 'fileResults': {
@@ -1360,6 +1559,7 @@
       }
 
       case 'setInputText':
+        if (pendingSubmission) break;
         if (msg.append && inputEl.value) inputEl.value = inputEl.value + '\n' + msg.text;
         else inputEl.value = msg.text;
         inputEl.focus();
@@ -1376,23 +1576,17 @@
         }
         break;
 
-      case 'error': {
-        clearWelcome();
-        const el = createElement('div', 'error-banner');
-        el.textContent = msg.message;
-        messagesEl.appendChild(el);
-        scrollToBottom(true);
+      case 'error':
+        showError(msg.message);
         break;
-      }
     }
   });
 
   // ── Send ──
 
   function sendMessage() {
-    if (historyLoading) return;
+    if (!canSubmit()) return;
     const text = inputEl.value.trim();
-    if (!text) return;
 
     const wasStreaming = state.isStreaming;
     if (!wasStreaming) {
@@ -1406,21 +1600,19 @@
       if (att.type === 'file') {
         formattedText += `\n\n@${att.path}`;
       } else if (att.type === 'image') {
-        images.push({ data: att.data, mime: att.mime });
+        images.push({ data: att.data, mime: att.mime, name: att.name });
       } else if (att.type === 'textcontent') {
         formattedText += `\n\nAttached file "${att.name}":\n\`\`\`\n${att.content}\n\`\`\``;
       }
     });
 
-    inputEl.value = '';
-    inputEl.style.height = 'auto';
-    attachments = [];
-    renderAttachments();
+    // Keep the exact draft until Pi acknowledges acceptance. Rejection merely
+    // unlocks it, so images/text cannot be lost or overwritten by a new draft.
+    pendingSubmission = uniqueId();
     hideAutocomplete();
-    sendBtn.disabled = true;
+    updateComposerState();
     autoScroll = true;
-
-    vscode.postMessage({ type: 'prompt', text: formattedText, images, streaming: wasStreaming });
+    vscode.postMessage({ type: 'prompt', submissionId: pendingSubmission, text: formattedText, images, streaming: wasStreaming });
   }
 
   // ── Input events ──
@@ -1433,10 +1625,7 @@
       inputEl.style.height = 'auto';
       inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
     }
-    sendBtn.disabled = historyLoading || !v.trim();
-    if (state.isStreaming) {
-      sendBtn.classList.toggle('hidden', !v.trim());
-    }
+    updateComposerState();
     // Only check autocomplete when cursor is near @ or / (avoids IPC on every keystroke)
     const cursor = inputEl.selectionStart;
     const ch = v[cursor - 1] || '';
@@ -1495,7 +1684,10 @@
     thinkingLevelEl.textContent = next;
     vscode.postMessage({ type: 'setThinkingLevel', level: next });
   });
-  btnAttach.addEventListener('click', () => vscode.postMessage({ type: 'selectFileToAttach' }));
+  btnAttach.addEventListener('click', () => {
+    if (historyLoading || pendingSubmission) return;
+    vscode.postMessage({ type: 'selectFileToAttach', requestId: beginAttachmentRead() });
+  });
   if (btnKey) btnKey.addEventListener('click', () => vscode.postMessage({ type: 'configureProvider' }));
   if (btnKeys) btnKeys.addEventListener('click', () => vscode.postMessage({ type: 'configureProvider' }));
   if (btnStyle) btnStyle.addEventListener('click', () => {
@@ -1505,30 +1697,27 @@
   // ── Paste image ──
 
   inputEl.addEventListener('paste', (e) => {
-    const items = (e.clipboardData || window.clipboardData).items;
-    for (const item of items) {
-      if (item.type.indexOf('image') === 0) {
-        const file = item.getAsFile();
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          addAttachment({
-            name: `pasted-image-${Date.now()}.png`,
-            path: `pasted-image-${Date.now()}`,
-            data: evt.target.result.split(',')[1],
-            mime: file.type,
-            type: 'image',
-          });
-        };
-        reader.readAsDataURL(file);
-        e.preventDefault();
-      }
+    if (historyLoading || pendingSubmission) return;
+    const clipboard = e.clipboardData;
+    if (!clipboard) return;
+    const files = Array.from(clipboard.items || [])
+      .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+      .map(item => item.getAsFile()).filter(Boolean);
+    if (!files.length) return; // Preserve the browser's normal text paste.
+    e.preventDefault();
+    // A clipboard can contain both text and pixels (e.g. copied from a browser).
+    const text = clipboard.getData('text/plain');
+    if (text) {
+      inputEl.setRangeText(text, inputEl.selectionStart, inputEl.selectionEnd, 'end');
+      inputEl.dispatchEvent(new Event('input'));
     }
+    files.forEach(file => { void attachImageFile(file); });
   });
 
   // ── Drag & drop ──
   // Sources handled:
   //  1. VS Code explorer/editor tabs → 'application/vnd.code.uri-list', 'codefiles', 'resourceurls', 'text/uri-list'
-  //  2. Finder / OS → dataTransfer.files (path if Electron exposes it, else read contents)
+  //  2. Finder / OS → dataTransfer.files (read local bytes, even with a remote host)
   //  3. Plain text paths
 
   const dropZone = createElement('div', 'hidden');
@@ -1554,103 +1743,77 @@
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
   });
 
-  function uriToPath(text) {
-    let t = String(text || '').trim().replace(/^["']|["']$/g, '');
-    if (!t || t.startsWith('#')) return '';
-    if (t.startsWith('file://')) {
-      try { t = decodeURIComponent(t.replace(/^file:\/\/(localhost)?/, '')); } catch { return ''; }
-      // Windows: /C:/foo → C:/foo
-      if (/^\/[a-zA-Z]:[\\/]/.test(t)) t = t.slice(1);
-      return t;
+  function fileUri(value) {
+    if (typeof value !== 'string') return '';
+    const text = value.trim().replace(/^["']|["']$/g, '');
+    // Keep remote authority and encoded path intact for workspace.fs.
+    if (/^(file|vscode-remote):\/\//.test(text)) return text;
+    if (text.startsWith('vscode-file://')) {
+      try { return 'file://' + new URL(text).pathname; } catch { return ''; }
     }
-    if (t.startsWith('vscode-remote://') || t.startsWith('vscode-file://')) {
-      try {
-        const u = new URL(t);
-        return decodeURIComponent(u.pathname);
-      } catch { return ''; }
+    if (text.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(text)) {
+      const uri = new URL('file:///');
+      uri.pathname = text.replace(/\\/g, '/');
+      return uri.href;
     }
-    if (t.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(t)) return t;
     return '';
   }
 
-  function attachPath(p) {
-    if (!p) return false;
-    addAttachment({ name: p.split(/[\\/]/).pop(), path: p, type: 'file' });
+  function attachUris(values) {
+    const uris = [...new Set(values.map(fileUri).filter(Boolean))];
+    if (!uris.length) return false;
+    vscode.postMessage({ type: 'attachFiles', requestId: beginAttachmentRead(), uris });
     return true;
+  }
+
+  async function attachTextFile(file) {
+    const requestId = beginAttachmentRead();
+    try {
+      if (file.size > 256 * 1024) throw new Error('Dropped text files must be at most 256 KiB. Use the file picker for a path reference.');
+      const content = await readFile(file, true);
+      if (/[\u0000-\u0008\u000e-\u001f]/.test(content)) throw new Error('Unsupported binary file.');
+      if (pendingAttachmentReads.has(requestId)) {
+        addAttachment({ id: uniqueId(), name: file.name, content: content.slice(0, 64 * 1024), type: 'textcontent' });
+      }
+    } catch (err) {
+      if (pendingAttachmentReads.has(requestId)) showError(`Cannot attach ${file.name}: ${err}`);
+    } finally {
+      pendingAttachmentReads.delete(requestId);
+      updateComposerState();
+    }
   }
 
   window.addEventListener('drop', (e) => {
     e.preventDefault();
     dragDepth = 0;
     showDropZone(false);
+    if (historyLoading || pendingSubmission) return;
     const dt = e.dataTransfer;
     if (!dt) return;
-    let handled = false;
 
-    // 1. VS Code-specific payloads
+    // Explorer/editor resources are read by the extension host, including SSH URIs.
     const codeUris = dt.getData('application/vnd.code.uri-list');
-    if (codeUris) {
-      codeUris.split(/[\r\n]+/).forEach(u => { if (attachPath(uriToPath(u))) handled = true; });
-    }
-    if (!handled) {
-      const resourceUrls = dt.getData('resourceurls');
-      if (resourceUrls) {
-        try {
-          JSON.parse(resourceUrls).forEach(u => { if (attachPath(uriToPath(u))) handled = true; });
-        } catch { /* not JSON */ }
-      }
-    }
-    if (!handled) {
-      const codeFiles = dt.getData('codefiles');
-      if (codeFiles) {
-        try {
-          JSON.parse(codeFiles).forEach(p => { if (attachPath(p)) handled = true; });
-        } catch { /* not JSON */ }
-      }
+    if (codeUris && attachUris(codeUris.split(/[\r\n]+/))) return;
+    for (const format of ['resourceurls', 'codefiles']) {
+      try {
+        const values = JSON.parse(dt.getData(format) || 'null');
+        if (Array.isArray(values) && attachUris(values)) return;
+      } catch { /* Not a VS Code resource list. */ }
     }
 
-    // 2. Generic uri-list / plain text
-    if (!handled) {
-      const uriList = dt.getData('text/uri-list') || dt.getData('text/plain');
-      if (uriList) {
-        uriList.split(/[\r\n]+/).forEach(u => { if (attachPath(uriToPath(u))) handled = true; });
+    // Read OS File bytes before generic URI text: a local Finder path is not a
+    // file on a remote extension host, and images must never become @path text.
+    if (dt.files.length) {
+      for (const file of dt.files) {
+        if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp|tiff?|ico|avif|heic|heif)$/i.test(file.name)) {
+          void attachImageFile(file);
+        } else {
+          void attachTextFile(file);
+        }
       }
+      return;
     }
-    if (handled) return;
-
-    // 3. OS file objects (Finder). Prefer the real path when Electron exposes
-    //    it; otherwise read the contents (image → base64, text → inline).
-    for (const file of dt.files) {
-      if (file.path && attachPath(file.path)) continue;
-
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          addAttachment({
-            name: file.name,
-            path: `dropped-${Date.now()}-${file.name}`,
-            data: evt.target.result.split(',')[1],
-            mime: file.type,
-            type: 'image',
-          });
-        };
-        reader.readAsDataURL(file);
-      } else if (file.size <= 256 * 1024) {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          const content = String(evt.target.result || '');
-          // Skip binary-looking content
-          if (/[\u0000-\u0008\u000e-\u001f]/.test(content.slice(0, 1000))) return;
-          addAttachment({
-            name: file.name,
-            path: `dropped-${Date.now()}-${file.name}`,
-            content: content.slice(0, 64 * 1024),
-            type: 'textcontent',
-          });
-        };
-        reader.readAsText(file);
-      }
-    }
+    attachUris((dt.getData('text/uri-list') || dt.getData('text/plain')).split(/[\r\n]+/));
   });
 
   applyStyle(state.style);

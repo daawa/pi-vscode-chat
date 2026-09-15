@@ -3,20 +3,29 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PNG } from './image-fixtures.ts';
 
 const readFile = mock(async (_uri: unknown) => Buffer.from('new content'));
 const writeFile = mock(async (_uri: unknown, _content: Uint8Array) => {});
 const deleteFile = mock(async (_uri: unknown) => {});
+const stat = mock(async (_uri: unknown) => ({ type: 1, size: 100 }));
+const showOpenDialog = mock(async (_options: unknown): Promise<any> => undefined);
+const parseUri = (value: string) => {
+  const url = new URL(value);
+  return { scheme: url.protocol.slice(0, -1), path: decodeURIComponent(url.pathname),
+    fsPath: decodeURIComponent(url.pathname), toString: () => value };
+};
 const showQuickPick = mock(async (_items: any[], _options: unknown): Promise<any> => undefined);
 mock.module('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
     textDocuments: [],
-    fs: { readFile, writeFile, delete: deleteFile },
+    fs: { readFile, writeFile, delete: deleteFile, stat },
     registerTextDocumentContentProvider: () => {},
   },
-  Uri: { file: (fsPath: string) => ({ fsPath }) },
-  window: { showQuickPick },
+  Uri: { file: (fsPath: string) => ({ fsPath }), parse: parseUri },
+  FileType: { File: 1 },
+  window: { showQuickPick, showOpenDialog },
   EventEmitter: class {
     private emitter = new EventEmitter();
     event = (listener: (value: any) => void) => { this.emitter.on('change', listener); };
@@ -75,6 +84,10 @@ function toolEnd(isError: boolean) {
 afterEach(() => {
   readFile.mockReset();
   readFile.mockImplementation(async () => Buffer.from('new content'));
+  stat.mockReset();
+  stat.mockImplementation(async () => ({ type: 1, size: 100 }));
+  showOpenDialog.mockReset();
+  showOpenDialog.mockImplementation(async () => undefined);
   writeFile.mockClear();
   deleteFile.mockClear();
   showQuickPick.mockReset();
@@ -368,6 +381,135 @@ describe('session history loading', () => {
     await expect(client.getMessages()).rejects.toThrow('pi not running');
     client.send = mock(async () => ({ type: 'response', command: 'get_messages', success: true, data: { messages: [] } }));
     expect(await client.getMessages()).toEqual([]);
+  });
+});
+
+describe('image input bridge', () => {
+  const images = [{ data: PNG, mime: 'image/png', name: 'screenshot.png' }];
+
+  test.each([false, true])('image-only prompt and authoritative streaming=%s', async (streaming) => {
+    const { provider, pi, messages } = createProvider();
+    pi.getState.mockResolvedValue({ model: { input: ['text', 'image'] }, isStreaming: streaming });
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'send-1', text: '', images, streaming: !streaming });
+    expect(pi.prompt).toHaveBeenCalledWith('', images, streaming ? 'steer' : undefined);
+    expect(messages.find(m => m.type === 'userMessage')).toMatchObject({ text: '', images, queued: streaming, submissionId: 'send-1' });
+    expect(messages.find(m => m.type === 'promptResult')).toEqual({ type: 'promptResult', submissionId: 'send-1', success: true });
+  });
+
+  test('exposes image capability in live model state', async () => {
+    const { provider, pi, messages } = createProvider();
+    pi.getState.mockResolvedValue({ model: { input: ['text', 'image'] } });
+    await provider.sendState();
+    expect(messages[0].modelSupportsImages).toBe(true);
+    pi.getState.mockResolvedValue({ model: { input: ['text'] } });
+    await provider.sendState();
+    expect(messages[1].modelSupportsImages).toBe(false);
+  });
+
+  test.each([
+    { images, model: { input: ['text'] }, error: 'supports images' },
+    { images: [{ data: PNG, mime: 'image/jpeg' }], model: { input: ['image'] }, error: 'MIME' },
+    { images: [{ data: 'data:image/png;base64,' + PNG, mime: 'image/png' }], model: { input: ['image'] }, error: 'base64' },
+  ])('invalid/unsupported input is rejected before echoing: %j', async ({ images, model, error }) => {
+    const { provider, pi, edits, messages } = createProvider();
+    pi.getState.mockResolvedValue({ model });
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'bad', text: '', images });
+    expect(pi.prompt).not.toHaveBeenCalled();
+    expect(edits.snapshotWorkspace).not.toHaveBeenCalled();
+    expect(messages.some(m => m.type === 'userMessage')).toBe(false);
+    expect(messages.find(m => m.type === 'promptResult')).toMatchObject({ success: false, error: expect.stringContaining(error) });
+  });
+
+  test('RPC rejection acknowledges failure, then allows retry', async () => {
+    const { provider, pi, messages } = createProvider();
+    pi.prompt.mockResolvedValueOnce({ success: false, error: 'Authentication required' } as any);
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'bad', text: 'Describe this' });
+    expect(messages.find(m => m.type === 'promptResult')).toMatchObject({ success: false, error: expect.stringContaining('Authentication required') });
+    expect(provider.promptPending).toBe(false);
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'retry', text: 'Describe this' });
+    expect(messages.filter(m => m.type === 'promptResult').at(-1)).toMatchObject({ submissionId: 'retry', success: true });
+  });
+
+  test('loading and in-flight submissions reject IPC with a correlated acknowledgment', async () => {
+    const { provider, pi, messages } = createProvider(false);
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'loading', text: 'Draft' });
+    expect(messages[0]).toMatchObject({ type: 'promptResult', submissionId: 'loading', success: false });
+    provider.historyLoading = false;
+    let release!: (value: any) => void;
+    pi.prompt.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const pending = provider.handleWebviewMessage({ type: 'prompt', submissionId: 'one', text: 'First' });
+    await Promise.resolve();
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'two', text: 'Duplicate' });
+    await provider.newSession();
+    expect(pi.newSession).not.toHaveBeenCalled();
+    expect(pi.prompt).toHaveBeenCalledTimes(1);
+    expect(messages.find(m => m.submissionId === 'two')).toMatchObject({ success: false });
+    release({ success: true });
+    await pending;
+  });
+
+  test('rejects image-consuming extension commands but allows prompt templates', async () => {
+    const { provider, pi, messages } = createProvider();
+    pi.getState.mockResolvedValue({ model: { input: ['image'] } });
+    pi.getCommands = async () => [{ name: 'name', source: 'extension' }, { name: 'review', source: 'prompt' }] as any;
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'cmd', text: '/name x', images });
+    expect(pi.prompt).not.toHaveBeenCalled();
+    expect(messages.find(m => m.type === 'promptResult').error).toContain('Extension commands');
+    await provider.handleWebviewMessage({ type: 'prompt', submissionId: 'template', text: '/review', images });
+    expect(pi.prompt).toHaveBeenCalledWith('/review', images, undefined);
+  });
+
+  test('picker reads image bytes via workspace.fs and preserves ordinary file references', async () => {
+    const { provider, messages } = createProvider();
+    showOpenDialog.mockResolvedValue([parseUri('file:///workspace/a%20b.png'), parseUri('file:///workspace/code.ts')]);
+    readFile.mockResolvedValue(Buffer.from(PNG, 'base64'));
+    await provider.handleWebviewMessage({ type: 'selectFileToAttach', requestId: 'pick' });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    expect(messages[0]).toMatchObject({ type: 'attachmentsSelected', requestId: 'pick', errors: [], attachments: [
+      { id: 'file:///workspace/a%20b.png', type: 'image', name: 'a b.png', data: PNG, mime: 'image/png' },
+      { type: 'file', name: 'code.ts', path: '/workspace/code.ts' },
+    ] });
+  });
+
+  test('remote URI authority survives attachment ingestion; duplicates are read once', async () => {
+    const { provider, messages } = createProvider();
+    const uri = 'vscode-remote://ssh-remote+host/workspace/screenshot.png';
+    readFile.mockResolvedValue(Buffer.from(PNG, 'base64'));
+    await provider.handleWebviewMessage({ type: 'attachFiles', requestId: 'drop', uris: [uri, uri] });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    expect((readFile.mock.calls[0][0] as any).toString()).toBe(uri);
+    expect(messages[0].attachments[0]).toMatchObject({ id: uri, type: 'image', data: PNG });
+  });
+
+  test('cancelled picker always completes the read lifecycle', async () => {
+    const { provider, messages } = createProvider();
+    await provider.handleWebviewMessage({ type: 'selectFileToAttach', requestId: 'cancel' });
+    expect(messages[0]).toEqual({ type: 'attachmentsSelected', requestId: 'cancel', attachments: [], errors: [] });
+  });
+
+  test('oversized, unreadable, and unsupported images report errors without payloads', async () => {
+    const { provider, messages } = createProvider();
+    stat.mockResolvedValueOnce({ type: 1, size: 5 * 1024 * 1024 });
+    readFile.mockRejectedValueOnce(new Error('Permission denied'));
+    readFile.mockResolvedValueOnce(Buffer.from('<svg width="1" height="1"></svg>'));
+    await provider.handleWebviewMessage({ type: 'attachFiles', requestId: 'bad-files', uris: [
+      'file:///large.png', 'file:///private.png', 'file:///vector.svg', 'https://example.com/image.png',
+    ] });
+    expect(messages[0].attachments).toEqual([]);
+    expect(messages[0].errors).toHaveLength(4);
+    expect(readFile).toHaveBeenCalledTimes(2);
+  });
+
+  test('RPC serializes images for prompts and steering without UI metadata or data URL prefixes', async () => {
+    const { PiRpcClient } = await import('../src/piRpcClient.ts');
+    const client = new PiRpcClient('pi', []);
+    client.send = mock(async () => ({ type: 'response', command: 'prompt', success: true }));
+    await client.prompt('', images, 'steer');
+    expect(client.send).toHaveBeenCalledWith({ type: 'prompt', message: '', streamingBehavior: 'steer',
+      images: [{ type: 'image', data: PNG, mimeType: 'image/png' }] });
+    await client.steer('Look here', images);
+    expect(client.send).toHaveBeenLastCalledWith({ type: 'steer', message: 'Look here',
+      images: [{ type: 'image', data: PNG, mimeType: 'image/png' }] });
   });
 });
 

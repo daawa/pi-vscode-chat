@@ -948,6 +948,12 @@ pre:hover .code-copy { opacity: 1; }
   font-size: 11px;
 }
 .attachment-chip button:hover { color: var(--error); }
+.attachment-chip button:disabled { cursor: default; opacity: 0.5; }
+.image-attachment { padding: 5px 7px; }
+.attachment-thumbnail { width: 44px; height: 44px; object-fit: contain; border-radius: 4px; flex-shrink: 0; }
+#attachment-status { padding: 6px 10px; font-size: 11px; color: var(--text-dim); }
+.message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.message-image { max-width: min(100%, 240px); max-height: 180px; object-fit: contain; border: 1px solid var(--border-soft); border-radius: 6px; }
 
 /* ══ Dialogs (extension UI) ══ */
 

@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { StringDecoder } from 'string_decoder';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import type { RpcCommand, RpcResponse, RpcEvent, ExtensionUiRequest, PiCommandInfo, SessionStats } from './types.js';
+import type { RpcCommand, RpcResponse, RpcEvent, ExtensionUiRequest, PiCommandInfo, SessionStats, PromptImage } from './types.js';
 
 /**
  * Manages a pi --mode rpc child process.
@@ -67,6 +67,12 @@ export class PiRpcClient extends EventEmitter {
     });
 
     this._isRunning = true;
+
+    // Large image commands may still be buffered when the process exits.
+    this.proc.stdin!.on('error', (err) => {
+      for (const { reject } of this.pendingRequests.values()) reject(err);
+      this.pendingRequests.clear();
+    });
 
     // stdout: parse JSONL events
     this.proc.stdout!.on('data', (chunk: Buffer) => {
@@ -140,7 +146,12 @@ export class PiRpcClient extends EventEmitter {
       });
 
       try {
-        this.proc!.stdin!.write(line);
+        this.proc!.stdin!.write(line, (err) => {
+          if (!err) return;
+          this.pendingRequests.delete(id);
+          clearTimeout(timeout);
+          reject(err);
+        });
       } catch (err) {
         this.pendingRequests.delete(id);
         clearTimeout(timeout);
@@ -153,7 +164,7 @@ export class PiRpcClient extends EventEmitter {
    *  If the agent is streaming, pass streamingBehavior to queue the message. */
   async prompt(
     message: string,
-    images?: { data: string; mime: string }[],
+    images?: PromptImage[],
     streamingBehavior?: 'steer' | 'followUp',
   ): Promise<{ success: boolean; error?: string }> {
     const cmd: any = { type: 'prompt', message };
@@ -170,7 +181,7 @@ export class PiRpcClient extends EventEmitter {
   }
 
   /** Queue a steering message while the agent is running */
-  async steer(message: string, images?: { data: string; mime: string }[]): Promise<boolean> {
+  async steer(message: string, images?: PromptImage[]): Promise<boolean> {
     const cmd: any = { type: 'steer', message };
     if (images && images.length > 0) {
       cmd.images = images.map(img => ({ type: 'image', data: img.data, mimeType: img.mime }));
@@ -288,7 +299,8 @@ export class PiRpcClient extends EventEmitter {
       // Also emit typed events for convenience
       this.emit(msg.type, msg);
     } catch (err) {
-      console.warn('[pi] failed to parse line:', line.slice(0, 200), err);
+      // Parse errors can contain the offending JSON (including image data).
+      console.warn('[pi] failed to parse an RPC record');
     }
   }
 }

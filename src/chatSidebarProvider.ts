@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { IMAGE_LIMITS, inspectImage, isImagePath, validatePromptImages } from './imageAttachments.ts';
 import { PiRpcClient } from './piRpcClient.ts';
 import { EditManager } from './editManager.ts';
 import { LAST_SESSION_FILE_STATE_KEY } from './types.ts';
-import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord, ChatStyle } from './types.ts';
+import type { WebviewMessage, WebviewOutMessage, RpcEvent, ExtensionUiRequest, EditRecord, ChatStyle, Attachment, PromptImage } from './types.ts';
 
 /**
  * WebviewViewProvider for the Pi Chat sidebar.
@@ -17,6 +18,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private stateRequestId = 0;
   private historyRequestId = 0;
   private historyLoading = true;
+  private promptPending = false;
   private diffContentProvider = new PiOriginalContentProvider();
   private toolCalls = new Map<string, { args: Record<string, any>; snapshot?: Promise<unknown> }>();
 
@@ -72,6 +74,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   /** Start a fresh session (also callable from command palette) */
   async newSession(): Promise<void> {
+    if (this.promptPending) return;
     const requestId = this.invalidateHistory();
     try {
       await this.pi.newSession();
@@ -89,10 +92,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   private async handleWebviewMessage(msg: WebviewMessage): Promise<void> {
     // The webview also gates submission, but queued IPC must not bypass session history loading.
-    if (this.historyLoading && (msg.type === 'prompt' || msg.type === 'runCommand')) return;
+    if ((this.historyLoading || this.promptPending) && (msg.type === 'prompt' || msg.type === 'runCommand')) {
+      if (msg.type === 'prompt' && msg.submissionId) {
+        this.postMessage({ type: 'promptResult', submissionId: msg.submissionId, success: false,
+          error: 'Wait for session loading or the current submission to finish.' });
+      }
+      return;
+    }
     switch (msg.type) {
       case 'prompt':
-        await this.handlePrompt(msg.text, msg.images, msg.streaming);
+        await this.handlePrompt(msg.text, msg.images, msg.streaming, msg.submissionId);
         break;
       case 'abort':
         this.pi.abort();
@@ -174,7 +183,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         await this.handleSearchFile(msg.query);
         break;
       case 'selectFileToAttach':
-        await this.handleSelectFileToAttach();
+        await this.handleSelectFileToAttach(msg.requestId);
+        break;
+      case 'attachFiles':
+        await this.handleAttachFiles(msg.requestId, msg.uris);
         break;
       case 'getSessions':
         this.handleGetSessions();
@@ -248,6 +260,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleResumeSession(filePath: string): Promise<void> {
+    if (this.promptPending) return;
     const requestId = this.invalidateHistory();
     try {
       // Prefer in-process switch; fall back to restart if pi is not running
@@ -260,6 +273,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.pi.start(filePath);
       }
       this.edits.clear();
+      // A draft/late attachment from the previous session must not leak here.
+      this.postMessage({ type: 'clearComposer' });
       // Load history through RPC (respects branches/compaction)
       this.toolCalls.clear();
       await this.loadHistory();
@@ -272,23 +287,48 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Files ──
 
-  private async handleSelectFileToAttach(): Promise<void> {
-    const uris = await vscode.window.showOpenDialog({
-      canSelectFiles: true,
-      canSelectFolders: false,
-      canSelectMany: true,
-      openLabel: 'Attach File',
-    });
-
-    if (uris && uris.length > 0) {
-      for (const uri of uris) {
-        this.postMessage({
-          type: 'addFileAttachment',
-          name: path.basename(uri.fsPath),
-          path: uri.fsPath,
-        });
-      }
+  private async handleSelectFileToAttach(requestId: string): Promise<void> {
+    try {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: true,
+        openLabel: 'Attach File',
+      });
+      await this.handleAttachFiles(requestId, (uris || []).map(uri => uri.toString()));
+    } catch (err) {
+      this.postMessage({ type: 'attachmentsSelected', requestId, attachments: [], errors: [String(err)] });
     }
+  }
+
+  private async handleAttachFiles(requestId: string, uris: string[]): Promise<void> {
+    const attachments: Attachment[] = [];
+    const errors: string[] = [];
+    try {
+      if (!Array.isArray(uris) || uris.length > 20) throw new Error('Select at most 20 files at a time.');
+      let imageBytes = 0;
+      for (const value of new Set(uris)) {
+        try {
+          if (typeof value !== 'string') throw new Error('Invalid file URI.');
+          const uri = vscode.Uri.parse(value, true);
+          if (!['file', 'vscode-remote'].includes(uri.scheme)) throw new Error('Only local or VS Code remote files can be attached.');
+          const name = path.posix.basename(uri.path);
+          if (!isImagePath(name)) {
+            attachments.push({ id: uri.toString(), type: 'file', name, path: uri.fsPath });
+            continue;
+          }
+          if (attachments.filter(a => a.type === 'image').length >= IMAGE_LIMITS.count) throw new Error('Attach at most 4 images per message.');
+          const stat = await vscode.workspace.fs.stat(uri);
+          if (!(stat.type & vscode.FileType.File) || stat.size > IMAGE_LIMITS.bytes) throw new Error('Image must be a file of at most 4 MiB.');
+          const bytes = await vscode.workspace.fs.readFile(uri);
+          const { mime } = inspectImage(bytes);
+          if (imageBytes + bytes.length > IMAGE_LIMITS.totalBytes) throw new Error('Images must total at most 12 MiB.');
+          imageBytes += bytes.length;
+          attachments.push({ id: uri.toString(), type: 'image', name, data: Buffer.from(bytes).toString('base64'), mime });
+        } catch (err) { errors.push(String(err)); }
+      }
+    } catch (err) { errors.push(String(err)); }
+    this.postMessage({ type: 'attachmentsSelected', requestId, attachments, errors });
   }
 
   /** Inline fuzzy file search — results rendered as a dropdown inside the webview */
@@ -304,25 +344,46 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   // ── Prompting ──
 
-  private async handlePrompt(text: string, images?: { data: string; mime: string }[], streaming?: boolean): Promise<void> {
-    const isCommand = text.startsWith('/');
-    this.postMessage({ type: 'userMessage', text, queued: !!streaming && !isCommand });
-
-    // Extension commands may finish without any agent_start/agent_end events.
-    if (!streaming && !isCommand) {
-      this.setStreaming(true);
-      await this.edits.snapshotWorkspace();
+  private async handlePrompt(text: string, images?: PromptImage[], streaming?: boolean, submissionId?: string): Promise<void> {
+    this.promptPending = true;
+    let started = false;
+    try {
+      if (typeof text !== 'string') throw new Error('Invalid prompt text.');
+      images = validatePromptImages(images);
+      if (!text.trim() && !images?.length) throw new Error('Enter a message or attach an image.');
+      const isCommand = text.startsWith('/');
+      if (images?.length) {
+        const current = await this.pi.getState();
+        if (!current?.model?.input?.includes('image')) throw new Error('Select a model that supports images before sending attachments.');
+        streaming = !!current.isStreaming;
+        if (isCommand) {
+          const command = text.split(/\s/, 1)[0].slice(1);
+          const commands = await this.pi.getCommands();
+          if (commands.some(c => c.name === command && c.source === 'extension')) {
+            throw new Error('Extension commands do not receive image attachments. Send the images as a regular prompt instead.');
+          }
+        }
+      }
+      // Echo before streamed output, but remove this bubble if Pi rejects preflight.
+      this.postMessage({ type: 'userMessage', text, images, queued: !!streaming && !isCommand, submissionId });
+      if (!streaming && !isCommand) {
+        started = true;
+        this.setStreaming(true);
+        await this.edits.snapshotWorkspace();
+      }
+      const behavior = streaming && (!isCommand || !!images?.length) ? 'steer' : undefined;
+      const result = await this.pi.prompt(text, images, behavior);
+      if (!result.success) throw new Error(result.error || 'Failed to send prompt to pi');
+      if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true });
+      if (isCommand) await this.sendState();
+    } catch (err) {
+      const error = String(err);
+      if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: false, error });
+      else this.postMessage({ type: 'error', message: error });
+      if (started) this.setStreaming(false);
+    } finally {
+      this.promptPending = false;
     }
-
-    const behavior = streaming && !isCommand ? 'steer' : undefined;
-    const result = await this.pi.prompt(text, images, behavior).catch((err) => ({ success: false, error: String(err) }));
-    if (!result.success) {
-      this.postMessage({ type: 'error', message: result.error || 'Failed to send prompt to pi' });
-      if (!streaming) this.setStreaming(false);
-    }
-    // /name (and other extension commands) may update state without an agent run.
-    // Read the authoritative value, not the command arguments or notification text.
-    if (isCommand) await this.sendState();
   }
 
   private async handleShowDiff(editId: string): Promise<void> {
@@ -648,6 +709,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       type: 'init',
       model: state?.model ? `${state.model.provider}/${state.model.id}` : 'unknown',
       modelReasoning: !!state?.model?.reasoning,
+      modelSupportsImages: !!state?.model?.input?.includes('image'),
       thinkingLevel: state?.thinkingLevel || 'off',
       state: this.isStreaming || state?.isStreaming ? 'streaming' : 'idle',
       sessionName: state?.sessionName,
@@ -772,6 +834,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         <div id="autocomplete" class="hidden"></div>
         <div id="input-container">
           <div id="attachment-list"></div>
+          <div id="attachment-status" class="hidden" role="status" aria-live="polite"></div>
           <textarea id="input" rows="1" placeholder="Ask Pi — @ for files, / for commands"></textarea>
           <div id="input-toolbar">
             <div class="left-actions">

@@ -159,8 +159,17 @@ export type ExtensionUiRequest =
 
 export type ChatStyle = 'default' | 'custom';
 
+export interface PromptImage {
+  data: string;
+  mime: string;
+  name?: string;
+}
+export type FileAttachment = { id: string; type: 'file'; name: string; path: string };
+export type ImageAttachment = PromptImage & { id: string; type: 'image'; name: string };
+export type Attachment = FileAttachment | ImageAttachment;
+
 export type WebviewMessage =
-  | { type: 'prompt'; text: string; images?: { data: string; mime: string }[]; streaming?: boolean }
+  | { type: 'prompt'; text: string; images?: PromptImage[]; streaming?: boolean; submissionId?: string }
   | { type: 'abort' }
   | { type: 'revertEdit'; editId: string }
   | { type: 'acceptEdit'; editId: string }
@@ -177,17 +186,20 @@ export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'runCommand'; command: string }
   | { type: 'searchFile'; query: string }
-  | { type: 'selectFileToAttach' }
+  | { type: 'selectFileToAttach'; requestId: string }
+  | { type: 'attachFiles'; requestId: string; uris: string[] }
   | { type: 'getSessions' }
   | { type: 'resumeSession'; filePath: string }
   | { type: 'extensionUiResponse'; id: string; value?: string; confirmed?: boolean; cancelled?: boolean };
 
 export type WebviewOutMessage =
-  | { type: 'init'; model: string; modelReasoning: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
+  | { type: 'init'; model: string; modelReasoning: boolean; modelSupportsImages: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
   | { type: 'commands'; commands: PiCommandInfo[] }
   | { type: 'styleSelected'; style: ChatStyle }
   | { type: 'stats'; stats: SessionStats | null }
-  | { type: 'addFileAttachment'; name: string; path: string }
+  | { type: 'attachmentsSelected'; requestId: string; attachments: Attachment[]; errors: string[] }
+  | { type: 'promptResult'; submissionId: string; success: boolean; error?: string }
+  | { type: 'clearComposer' }
   | { type: 'loadHistory'; messages: any[] }
   | { type: 'historyLoading'; loading: boolean }
   | { type: 'sessionsList'; sessions: any[] }
@@ -200,7 +212,7 @@ export type WebviewOutMessage =
   | { type: 'toolUpdate'; toolCallId: string; output: string }
   | { type: 'toolEnd'; messageId: string; toolCallId: string; toolName: string; isError: boolean; output?: string }
   | { type: 'toolDiff'; toolCallId: string; diff: string; filePath: string; fileContent?: string }
-  | { type: 'userMessage'; text: string; files?: string[]; queued?: boolean }
+  | { type: 'userMessage'; text: string; images?: PromptImage[]; files?: string[]; queued?: boolean; submissionId?: string }
   | { type: 'fileResults'; query: string; results: { label: string; path: string }[] }
   | { type: 'setInputText'; text: string; append?: boolean }
   | { type: 'editRecorded'; filePath: string; editId: string; diff: string }

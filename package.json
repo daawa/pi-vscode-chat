@@ -149,7 +149,7 @@
     "build": "bun build ./src/extension.ts --outdir ./out --target node --format esm --external vscode --sourcemap=linked",
     "build:vendor": "bun build ./media/vendor-entry.js --outfile ./media/vendor.js --format iife --minify",
     "screenshots": "bun run __tests__/screenshots/capture.ts",
-    "test": "bun test ./__tests__/tool-events.test.ts",
+    "test": "bun test ./__tests__",
     "test:webview": "browser-harness < ./__tests__/tool-states.py"
   },
   "devDependencies": {
@@ -161,5 +161,8 @@
     "marked": "^18.0.5",
     "playwright": "^1.62.1",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "image-size": "^2.0.2"
   }
 }

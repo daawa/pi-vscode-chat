@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Send images from the file picker, clipboard, and Explorer/Finder drops as Pi RPC image blocks, including image-only and steering prompts.
+- Show removable image thumbnails and retain images in live messages and restored session history.
+- Validate image format, MIME, bytes, dimensions, count, and selected model capability; preserve rejected drafts for retry.
+- Preserve remote file URIs and invalidate pending attachment reads when changing sessions.
+- Add image validation, bridge, and browser regression tests.
+
 ## 0.2.3 (2026-08-03)
 
 ### Performance
