@@ -1,0 +1,33 @@
+export const ICONS = {
+  sparkle: '<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l1.6 5.4L15 7l-5.4 1.6L8 14 6.4 8.6 1 7l5.4-1.6L8 0zm5.5 9.5l.8 2.7 2.7.8-2.7.8-.8 2.7-.8-2.7-2.7-.8 2.7-.8.8-2.7z"/></svg>',
+  chevron: '<svg class="chev" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 4l4 4-4 4"/></svg>',
+  terminal: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2.5 2-2.5 2M8.5 10.5h3"/></svg>',
+  search: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>',
+  pencil: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.5 2.5l2 2L5 13l-2.7.7L3 11l8.5-8.5z"/></svg>',
+  file: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 1.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L9 1.5z"/><path d="M9 1.5V5h3.5"/></svg>',
+  globe: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c-4.5 4-4.5 9 0 13 4.5-4 4.5-9 0-13z"/></svg>',
+  wrench: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9.5 4.5a3 3 0 0 1 4-2.8l-2 2 .8 2 2 .8 2-2a3 3 0 0 1-4.3 3.5L5.5 14.5a1.4 1.4 0 0 1-2-2L10 6a3 3 0 0 1-.5-1.5z"/></svg>',
+  agent: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="5" r="2.5"/><path d="M2.5 13.5c0-2.5 2.4-4 5.5-4s5.5 1.5 5.5 4"/></svg>',
+  check: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg>',
+  cross: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  copy: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>',
+  key: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M7.5 7.5A4.5 4.5 0 1 1 12 3a4.5 4.5 0 0 1-4.5 4.5zm0 0L2 13v2h2l1.5-1.5H7l1-1"/></svg>',
+};
+
+export const TOOL_ICONS = {
+  bash: ICONS.terminal,
+  read: ICONS.file,
+  write: ICONS.pencil,
+  edit: ICONS.pencil,
+  'multi-edit': ICONS.pencil,
+  grep: ICONS.search,
+  glob: ICONS.search,
+  find: ICONS.search,
+  ls: ICONS.file,
+  fetch: ICONS.globe,
+  'web-search': ICONS.globe,
+  browse: ICONS.globe,
+  agent: ICONS.agent,
+  subagent: ICONS.agent,
+  task: ICONS.agent,
+};

@@ -773,7 +773,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.extensionUri, 'media', 'style.custom.css'),
     );
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'),
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'main.bundle.js'),
     );
     const vendorUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'vendor.js'),

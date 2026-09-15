@@ -1,7 +1,7 @@
 """Browser regression tests: run `bun run test:webview` from the repository root.
 
 Requires browser-harness and its Chrome connection. Loads the real webview HTML,
-CSS and main.js in an isolated blank tab, with a mocked VS Code messaging API.
+CSS and main.bundle.js in an isolated blank tab, with a mocked VS Code messaging API.
 No Pi process is started and no workspace files or real chat state are changed.
 """
 
@@ -41,7 +41,7 @@ def load_fixture(saved_state=None):
       document.documentElement.style.setProperty('--text-dim', '#64748b');
     ''')
     # Keep each CDP request below the browser-harness daemon's line-size limit.
-    for filename in ['vendor.js', 'main.js']:
+    for filename in ['vendor.js', 'main.bundle.js']:
         source = (root / 'media' / filename).read_text()
         js('window.testMainSource = "";')
         for offset in range(0, len(source), 6000):
@@ -53,6 +53,29 @@ def load_fixture(saved_state=None):
       link.addEventListener('load', resolve, {once: true});
       link.addEventListener('error', () => reject(new Error('Stylesheet failed to load')), {once: true});
     })''')
+
+
+def await_js(expression, timeout=120):
+    # Timer-driven tests in background tabs may exceed one CDP request timeout.
+    js('window.testAsyncResult = null; void Promise.resolve(' + expression + ').then('
+       'value => window.testAsyncResult = {value}, '
+       'error => window.testAsyncResult = {error: String(error.stack || error)});')
+    deadline = time.monotonic() + timeout
+    while True:
+        result = js('window.testAsyncResult')
+        if result is not None:
+            assert not result.get('error'), result
+            return result['value']
+        assert time.monotonic() < deadline, js('window.imageTestProgress || "Browser test timed out"')
+        time.sleep(0.25)
+
+
+def run_suite(filename):
+    source = (root / '__tests__' / filename).read_text()
+    js('window.testSuiteSource = "";')
+    for offset in range(0, len(source), 6000):
+        js('window.testSuiteSource += ' + json.dumps(source[offset:offset + 6000]))
+    return await_js('(0, eval)(window.testSuiteSource)')
 
 
 target = new_tab('about:blank')
@@ -279,22 +302,12 @@ try:
         print('PASS:', name)
     print('14 session/tool-state regression tests passed')
 
-    source = (root / '__tests__/image-input.js').read_text()
-    js('window.testImageTests = "";')
-    for offset in range(0, len(source), 6000):
-        js('window.testImageTests += ' + json.dumps(source[offset:offset + 6000]))
-    # Hidden tabs can throttle timer-based FileReader/decode waits. Keep each
-    # harness request short rather than awaiting the whole suite in one call.
-    js('void (0, eval)(testImageTests).then(value => window.imageTestDone = value, err => window.imageTestFailure = String(err));')
-    deadline = time.monotonic() + 90
-    while True:
-        result = js('({done: window.imageTestDone, error: window.imageTestFailure, progress: window.imageTestProgress})')
-        assert not result.get('error'), result
-        if result.get('done') is not None:
-            break
-        assert time.monotonic() < deadline, result
-        time.sleep(0.25)
-    image_results = result['done']
+    module_results = run_suite('webview-modules.js')
+    assert len(module_results) == 8, module_results
+    for name in module_results:
+        print('PASS:', name)
+
+    image_results = run_suite('image-input.js')
     assert len(image_results) == 11, image_results
     for name in image_results:
         print('PASS:', name)
@@ -315,7 +328,7 @@ try:
     })()'''), 'Style button must be to the right of Keys'
     print('PASS: Style button opens the picker next to Keys in a narrow sidebar')
 
-    style_results = js('''(async () => {
+    style_results = await_js('''(async () => {
       const passed = [];
       const assert = (condition, message) => { if (!condition) throw new Error(message); };
       const send = data => window.dispatchEvent(new MessageEvent('message', {data}));
@@ -391,6 +404,6 @@ try:
         print('PASS: Saved style is restored in a fresh webview')
     finally:
         cdp('Target.closeTarget', targetId=restored_target)
-    print('33 webview regression tests passed')
+    print('41 webview regression tests passed')
 finally:
     cdp('Target.closeTarget', targetId=target)

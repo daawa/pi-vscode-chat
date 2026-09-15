@@ -209,9 +209,10 @@ Everything you type, attach, or that pi reads during execution is sent through p
 
 ```bash
 bun install                    # Install build deps (marked, highlight.js, TypeScript)
-bun run compile                # Full build: vendor + extension + type check
+bun run compile                # Full build: vendor + webview + extension + type check
 bun run build                  # Extension bundle only (fast iteration)
 bun run build:vendor           # Vendor bundle only (marked + hljs)
+bun run build:webview          # Bundle media/main.js + media/chat/* for the webview
 bun run watch                  # tsc -watch for type checking only
 bun run test                   # Unit/bridge regression tests (no Pi/provider needed)
 bun run test:webview           # Real webview tests via browser-harness + Chrome (mocked VS Code API)
@@ -230,7 +231,21 @@ src/
 ├── imageAttachments.ts       # Image format/MIME, dimensions and payload limits
 ├── types.ts                  # All message shapes (RPC, webview, events)
 media/
-├── main.js                   # Webview frontend (vanilla JS)
+├── main.js                   # Webview bootstrap and host-message routing
+├── chat/                     # ES modules; controller-local state, explicit dependencies
+│   ├── conversation.js       # Messages, thinking and streaming lifecycle
+│   ├── history.js            # Restored conversation rendering
+│   ├── markdown.js           # Markdown, highlighting, file links and render throttling
+│   ├── tools.js              # Tool cards, diffs and edit review actions
+│   ├── composer.js           # Draft, submission acknowledgment and input state
+│   ├── autocomplete.js       # @ files and / commands
+│   ├── attachments.js        # Attachment validation, previews and pending reads
+│   ├── drop-input.js         # Clipboard and drag/drop event handling
+│   ├── panels.js             # Team monitor, status chips, widgets, queue and stats
+│   ├── dialogs.js            # Extension UI dialogs
+│   ├── shell.js              # Style, model, session header and toolbar
+│   └── dom.js, icons.js, images.js  # Shared helpers
+├── main.bundle.js            # Generated standalone webview script (do not edit)
 ├── style.css                 # Theme-native styles (--vscode-* tokens)
 ├── vendor-entry.js           # Entry point for vendor bundle
 ├── vendor.js                 # Bundled marked + highlight.js (built)
@@ -239,6 +254,8 @@ media/
 ### READ THIS
 
 - The `out/extension.js` entry point is produced by **bun build**, not `tsc`. `tsc` only type-checks. If changes don't take effect, rebuild the bun bundle.
+- Edit frontend source in `media/main.js` or `media/chat/`, then run **`bun run build:webview`** (or `compile`). The host loads `media/main.bundle.js`, a single IIFE using the existing nonce-based CSP. The bundle and its source map are generated/ignored; packaging includes the bundle, not the source modules. `test:webview` rebuilds before testing the shipped script.
+- Each controller owns its feature state. `main.js` acquires the VS Code API once, connects controllers, and routes host events. Only conversation/streaming state is shared between conversation rendering and the composer; feature modules do not depend on globals from another module.
 - All message shapes across all three boundaries (RPC ↔ extension host ↔ webview) are defined in `src/types.ts` — single source of truth.
 - The webview has zero npm dependencies at runtime — all JS ships with the extension. No CDN. Strict CSP.
 - Colors come from `--vscode-*` CSS variables. No hard-coded palette.

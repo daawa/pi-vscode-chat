@@ -144,13 +144,14 @@
   },
   "scripts": {
     "vscode:prepublish": "bun run compile",
-    "compile": "bun run build:vendor && bun run build && tsc -p ./ --noEmit",
+    "compile": "bun run build:vendor && bun run build:webview && bun run build && tsc -p ./ --noEmit",
     "watch": "tsc -watch -p ./ --noEmit",
     "build": "bun build ./src/extension.ts --outdir ./out --target node --format esm --external vscode --sourcemap=linked",
     "build:vendor": "bun build ./media/vendor-entry.js --outfile ./media/vendor.js --format iife --minify",
+    "build:webview": "bun build ./media/main.js --outfile ./media/main.bundle.js --target browser --format iife --sourcemap=linked",
     "screenshots": "bun run __tests__/screenshots/capture.ts",
     "test": "bun test ./__tests__",
-    "test:webview": "browser-harness < ./__tests__/tool-states.py"
+    "test:webview": "bun run build:vendor && bun run build:webview && browser-harness < ./__tests__/tool-states.py"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

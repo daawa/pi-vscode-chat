@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Split the webview frontend into focused ES modules with controller-local state; bundle them into one CSP-compatible script for VS Code. Add module/helper and controller integration regression tests.
+
 - Send images from the file picker, clipboard, and Explorer/Finder drops as Pi RPC image blocks, including image-only and steering prompts.
 - Show removable image thumbnails and retain images in live messages and restored session history.
 - Validate image format, MIME, bytes, dimensions, count, and selected model capability; preserve rejected drafts for retry.

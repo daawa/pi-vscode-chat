@@ -3,4 +3,6 @@ out/
 *.vsix
 .DS_Store
 media/vendor.js
+media/main.bundle.js
+media/main.bundle.js.map
 CLAUDE.md
