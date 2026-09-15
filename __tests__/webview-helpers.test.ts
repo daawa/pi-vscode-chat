@@ -21,6 +21,36 @@ describe('webview module helpers', () => {
   });
 
   test.each([
+    String.raw`.replace(/^[/\\]/, '')`,
+    String.raw`.replace(/[/\\:]/g, '-')`,
+    String.raw`[/\\]`,
+    String.raw`[/\\:]`,
+    '/', '\\', '\\\\', '//', '../', './', '~/', 'C:\\',
+    '/Users/...', 'Users/...', String.raw`\Users\...`,
+  ])('does not link regex/code or incomplete paths: %s', (text) => {
+    expect(fileRefParts(text)).toBeNull();
+  });
+
+  test.each([
+    'a / b', 'const x = foo/bar;', 'readFile("src/main.ts")',
+    'src/*.ts', '/^foo$/', '/foo/g.test(value)', '[/\\\\]:12',
+    'foo\n/bar.ts', 'foo\t/bar.ts',
+  ])('does not link expressions containing separators: %s', (text) => {
+    expect(fileRefParts(text)).toBeNull();
+  });
+
+  test.each([
+    'src/main.ts', '/Users/alfie.zhang/WorkSpace/pi-ws',
+    String.raw`C:\Users\foo\bar`, String.raw`\\server\share\file.ts`,
+    './src/main.ts', '../src/main.ts', '~/project/README.md',
+    '/work/my project/file name.ts', 'src/你好.ts', 'src/.env',
+    'node_modules/@scope/package/index.js', 'src/', 'package.json',
+  ])('preserves ordinary file paths: %s', (text) => {
+    expect(fileRefParts(text)).toEqual({ filePath: text, line: undefined, endLine: undefined });
+    expect(fileRefParts(`${text}:12-34`)).toEqual({ filePath: text, line: 12, endLine: 34 });
+  });
+
+  test.each([
     ['/work/a b.png', 'file:///work/a%20b.png'],
     ['C:\\work\\a b.png', 'file:///C:/work/a%20b.png'],
     ['vscode-remote://ssh-remote+host/work/a%20b.png', 'vscode-remote://ssh-remote+host/work/a%20b.png'],

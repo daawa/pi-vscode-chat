@@ -12,8 +12,18 @@ const FILE_EXT_RE = /\.(?:[jt]sx?|jsx|mjs|cjs|json|jsonc|md|mdx|txt|py|rb|go|rs|
 
 function looksLikePath(p) {
   if (!p || /:\/\//.test(p)) return false; // skip URLs
-  if (/[\/\\]/.test(p)) return true;       // has a path separator
-  return FILE_EXT_RE.test(p);               // bare filename with a known extension
+  // Be conservative: inline code is not necessarily a path just because it
+  // contains a slash. Allow ordinary filename characters, not code/regex syntax.
+  // Strip a Windows drive or home prefix before validating path components.
+  const path = p.replace(/^[a-z]:[/\\]/i, '').replace(/^~[/\\]/, '');
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  if (!parts.length || !parts.every((part) =>
+    part === '.' || part === '..' ||
+    (part === part.trim() && /^[\p{L}\p{N}_.@+ -]+$/u.test(part) && /[\p{L}\p{N}_]/u.test(part))
+  )) return false;
+  // Separators and navigation components alone (/, \\, ../, etc.) aren't files.
+  if (!parts.some((part) => part !== '.' && part !== '..')) return false;
+  return /[/\\]/.test(p) || FILE_EXT_RE.test(p);
 }
 
 export function fileRefParts(text) {
