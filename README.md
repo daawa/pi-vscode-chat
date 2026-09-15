@@ -224,12 +224,30 @@ Press **F5** to launch the Extension Development Host (`.vscode/launch.json` run
 
 ```
 src/
-├── extension.ts              # Activation, command registration, dependency check
-├── piRpcClient.ts            # Child process manager, JSONL protocol
-├── chatSidebarProvider.ts    # WebviewViewProvider, event bridge
-├── editManager.ts            # File snapshots, accept/revert tracking
-├── imageAttachments.ts       # Image format/MIME, dimensions and payload limits
-├── types.ts                  # All message shapes (RPC, webview, events)
+├── extension.ts              # Activation and service/disposable ownership
+├── commands.ts               # Command palette/editor command registration
+├── configuration.ts          # Launch environment and agent/session paths
+├── chat-sidebar-provider.ts  # Webview ownership and command routing
+├── pi-rpc-client.ts          # Typed pi operations and RPC outcomes
+├── rpc/transport.ts          # Process-local JSONL parsing, requests and shutdown
+├── chat/
+│   ├── session-controller.ts # Prompt/history/session lifecycle and stale-response guards
+│   └── event-bridge.ts       # RPC events, tool correlation and edit notifications
+├── services/
+│   ├── session-repository.ts # Async session listing and cached/streamed titles
+│   ├── file-attachments.ts   # File picker, remote URI reads and file search
+│   ├── model-service.ts      # Shared model picker and authenticated-provider lookup
+│   └── editor-service.ts     # Native file/diff navigation and original-content lifetime
+├── setup/
+│   ├── dependencies.ts      # Async executable/package inventory
+│   └── setup-actions.ts     # Authentication, dependency reports and install UI
+├── webview/
+│   ├── html.ts              # HTML, resource URIs and CSP nonce
+│   └── style-picker.ts      # Native style selection
+├── edit-manager.ts          # File snapshots and accept/revert tracking
+├── image-attachments.ts      # Image format/MIME, dimensions and payload limits
+├── value-guards.ts           # Parsed JSON object narrowing
+└── *-types.ts, types.ts      # RPC/webview/edit contracts and their export barrel
 media/
 ├── main.js                   # Webview bootstrap and host-message routing
 ├── chat/                     # ES modules; controller-local state, explicit dependencies
@@ -256,7 +274,11 @@ media/
 - The `out/extension.js` entry point is produced by **bun build**, not `tsc`. `tsc` only type-checks. If changes don't take effect, rebuild the bun bundle.
 - Edit frontend source in `media/main.js` or `media/chat/`, then run **`bun run build:webview`** (or `compile`). The host loads `media/main.bundle.js`, a single IIFE using the existing nonce-based CSP. The bundle and its source map are generated/ignored; packaging includes the bundle, not the source modules. `test:webview` rebuilds before testing the shipped script.
 - Each controller owns its feature state. `main.js` acquires the VS Code API once, connects controllers, and routes host events. Only conversation/streaming state is shared between conversation rendering and the composer; feature modules do not depend on globals from another module.
-- All message shapes across all three boundaries (RPC ↔ extension host ↔ webview) are defined in `src/types.ts` — single source of truth.
+- TypeScript source filenames use **kebab-case**. RPC, webview and edit contracts live in `src/rpc-types.ts`, `src/webview-types.ts` and `src/edit-types.ts`; `src/types.ts` re-exports them. These contracts and the RPC client/transport do not depend on VS Code.
+- The host session controller owns prompt/history/loading guards. Cancelled session changes preserve drafts and Undo state; failed switches are reported rather than silently restarting pi. The event bridge fences late edit work when a session changes.
+- Each RPC process owns its parser, pending requests and shutdown timer. Shutdown waits for exit and escalates only against that same child; old output/exit callbacks cannot affect a replacement process. Host/view listeners and original-content registrations are explicitly disposed.
+- Dependency checks use one asynchronous package inventory per report. Session discovery sorts/limits before parsing, streams JSONL titles, and caches unchanged metadata. Full conversation history still comes from RPC, preserving branches and compaction.
+- Host tests use a mocked VS Code API and fake pi processes, plus one local child-process JSONL round trip. They do not start pi, contact an AI provider, install packages, or modify real sessions/credentials.
 - The webview has zero npm dependencies at runtime — all JS ships with the extension. No CDN. Strict CSP.
 - Colors come from `--vscode-*` CSS variables. No hard-coded palette.
 

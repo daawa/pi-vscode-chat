@@ -3,7 +3,7 @@ import { cleanAnsi, escapeHtml } from '../media/chat/dom.js';
 import { fileRefParts } from '../media/chat/markdown.js';
 import { fileUri } from '../media/chat/drop-input.js';
 import { imageBytes, IMAGE_LIMITS } from '../media/chat/images.js';
-import { IMAGE_LIMITS as HOST_IMAGE_LIMITS } from '../src/imageAttachments.ts';
+import { IMAGE_LIMITS as HOST_IMAGE_LIMITS } from '../src/image-attachments.ts';
 import { PNG } from './image-fixtures.ts';
 
 describe('webview module helpers', () => {

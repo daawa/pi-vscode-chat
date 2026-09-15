@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { IMAGE_LIMITS, inspectImage, isImagePath, validatePromptImages } from '../src/imageAttachments.ts';
+import { IMAGE_LIMITS, inspectImage, isImagePath, validatePromptImages } from '../src/image-attachments.ts';
 import { GIF, PNG } from './image-fixtures.ts';
 
 const png = Buffer.from(PNG, 'base64');

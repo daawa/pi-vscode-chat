@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Refactor the extension host into focused session/event controllers, services, setup actions and a Node-only RPC transport; use kebab-case TypeScript filenames and separate RPC/webview/edit contracts.
+- Isolate shutdown timers, parsers and pending requests per process; await shutdown and report asynchronous spawn errors without unhandled EventEmitter errors.
+- Preserve drafts and Undo state on cancelled session changes, serialize transitions, and discard stale history/state/stats/edit work after session changes or disposal.
+- Share model selection between the sidebar and command palette, use asynchronous dependency/session discovery with bounded/cached title reads, and explicitly dispose host/view/diff resources.
+- Expand host regression coverage for process lifecycle, cancellation, resource ownership, model selection, session metadata and dependency discovery.
+
 - Split the webview frontend into focused ES modules with controller-local state; bundle them into one CSP-compatible script for VS Code. Add module/helper and controller integration regression tests.
 
 - Send images from the file picker, clipboard, and Explorer/Finder drops as Pi RPC image blocks, including image-only and steering prompts.

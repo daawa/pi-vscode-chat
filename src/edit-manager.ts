@@ -1,28 +1,29 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { createPatch } from 'diff';
-import type { EditRecord } from './types.js';
+import type { EditRecord } from './edit-types.ts';
 
 /**
  * Manages file snapshots and edit tracking for accept/revert.
- * 
+ *
  * Flow:
  * 1. On agent_start: snapshot all open workspace files
  * 2. On edit tool start: snapshot unopened files before reading the result
  * 3. On edit tool result: update the pending file change and unified diff
  * 4. User can revert → restore from snapshot, or accept → keep current contents
  */
-export class EditManager {
+export class EditManager implements vscode.Disposable {
+  private generation = 0;
+  private disposed = false;
   private snapshots = new Map<string, Promise<string | null>>();
   private edits = new Map<string, EditRecord>();
   private onDidChangeEdits: vscode.EventEmitter<EditRecord> = new vscode.EventEmitter();
 
   readonly onDidChange: vscode.Event<EditRecord> = this.onDidChangeEdits.event;
 
-  constructor() {}
-
   /** Take snapshots of all dirty/visible documents before agent work */
   async snapshotWorkspace(): Promise<void> {
+    if (this.disposed) return;
     this.snapshots.clear();
 
     // Snapshot all open text documents
@@ -40,6 +41,7 @@ export class EditManager {
 
   /** Start reading at tool start, never after the tool has changed the file. */
   snapshotFile(filePath: string): Promise<string | null> {
+    if (this.disposed) return Promise.reject(new Error('Edit manager is disposed'));
     if (this.snapshots.has(filePath)) {
       return this.snapshots.get(filePath)!;
     }
@@ -62,17 +64,18 @@ export class EditManager {
   async recordEdit(
     filePath: string,
     newContent: string,
-    diff: string,
   ): Promise<EditRecord> {
+    const generation = this.generation;
     if (!this.snapshots.has(filePath)) {
       throw new Error(`Cannot snapshot file: ${filePath}`);
     }
     const snapshot = await this.snapshots.get(filePath)!;
+    if (this.disposed || generation !== this.generation) throw new Error('Session changed while recording edit');
     const pending = this.getPendingEdits().find(edit => edit.filePath === filePath);
     const originalContent = pending?.originalContent ?? snapshot ?? '';
     const originalExists = pending?.originalExists ?? snapshot !== null;
     // Pi's details.diff may be a line-numbered display, not a unified patch.
-    diff = createPatch(path.basename(filePath), originalContent, newContent);
+    const diff = createPatch(path.basename(filePath), originalContent, newContent);
 
     const record: EditRecord = {
       id: pending?.id ?? `edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -92,6 +95,7 @@ export class EditManager {
 
   /** Revert a file to its pre-agent snapshot */
   async revertEdit(editId: string): Promise<boolean> {
+    const generation = this.generation;
     const record = this.edits.get(editId);
     if (!record || record.status !== 'pending') return false;
 
@@ -102,6 +106,7 @@ export class EditManager {
       } else {
         await vscode.workspace.fs.delete(uri);
       }
+      if (generation !== this.generation) return true;
       this.snapshots.delete(record.filePath);
       record.status = 'reverted';
       this.onDidChangeEdits.fire(record);
@@ -131,47 +136,17 @@ export class EditManager {
     return Array.from(this.edits.values()).filter(e => e.status === 'pending');
   }
 
-  /** Get all edits */
-  getAllEdits(): EditRecord[] {
-    return Array.from(this.edits.values());
-  }
-
-  /** Clear state (new session) */
+  /** Clear state (new session), invalidating asynchronous edit work. */
   clear(): void {
+    this.generation++;
     this.snapshots.clear();
     this.edits.clear();
   }
 
-  /**
-   * Compute a simple unified diff between two strings.
-   * Used when pi's edit result doesn't include details.diff.
-   */
-  static computeDiff(original: string, modified: string): string {
-    const origLines = original.split('\n');
-    const modLines = modified.split('\n');
-
-    // Simple LCS-based diff for small changes
-    // For real use, we'd use diff-match-patch or similar
-    // This is a minimal implementation
-    const lines: string[] = [];
-    let i = 0, j = 0;
-
-    while (i < origLines.length || j < modLines.length) {
-      if (i < origLines.length && j < modLines.length && origLines[i] === modLines[j]) {
-        lines.push(` ${origLines[i]}`);
-        i++; j++;
-      } else {
-        if (i < origLines.length) {
-          lines.push(`-${origLines[i]}`);
-          i++;
-        }
-        if (j < modLines.length) {
-          lines.push(`+${modLines[j]}`);
-          j++;
-        }
-      }
-    }
-
-    return lines.join('\n');
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.clear();
+    this.onDidChangeEdits.dispose();
   }
 }

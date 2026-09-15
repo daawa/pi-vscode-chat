@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 
 root = Path.cwd()
-provider = (root / 'src/chatSidebarProvider.ts').read_text()
-html = provider.split('return /* html */`', 1)[1].split('`;', 1)[0]
+template = (root / 'src/webview/html.ts').read_text()
+html = template.split('return /* html */`', 1)[1].split('`;', 1)[0]
 # Resource URIs and CSP belong to the extension host, not this isolated fixture.
 html = re.sub(r'<meta http-equiv="Content-Security-Policy"[^>]*>', '', html)
 html = re.sub(r'<script\b[^>]*>.*?</script>', '', html, flags=re.S)

@@ -119,9 +119,9 @@ pi-vscode-chat/
 ├── docs/plans/              # Design docs
 ├── src/
 │   ├── extension.ts         # Activation, commands, lifecycle
-│   ├── piRpcClient.ts       # pi child process, JSONL I/O, event bus
-│   ├── chatSidebarProvider.ts # WebviewViewProvider for sidebar
-│   ├── editManager.ts       # Snapshot, diff tracking, revert
+│   ├── pi-rpc-client.ts       # pi child process, JSONL I/O, event bus
+│   ├── chat-sidebar-provider.ts # WebviewViewProvider for sidebar
+│   ├── edit-manager.ts       # Snapshot, diff tracking, revert
 │   └── types.ts             # Shared types
 └── media/
     ├── style.css            # Webview styles (Copilot-like)
@@ -133,8 +133,8 @@ pi-vscode-chat/
 ### Phase 1 — Skeleton
 1. `package.json` + `tsconfig.json`
 2. `extension.ts` — register commands, views
-3. `piRpcClient.ts` — spawn pi, JSONL parse, emit events
-4. `chatSidebarProvider.ts` — create webview, basic HTML scaffold
+3. `pi-rpc-client.ts` — spawn pi, JSONL parse, emit events
+4. `chat-sidebar-provider.ts` — create webview, basic HTML scaffold
 
 ### Phase 2 — Chat UI
 5. Webview HTML: message list, input box, file reference @-completion
@@ -142,7 +142,7 @@ pi-vscode-chat/
 7. Send prompt via RPC, handle response
 
 ### Phase 3 — File Changes
-8. `editManager.ts` — snapshot on agent_start, track edits
+8. `edit-manager.ts` — snapshot on agent_start, track edits
 9. Tool card diff badge + revert button
 10. `vscode.diff` integration
 

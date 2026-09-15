@@ -1,5 +1,7 @@
 # Pi VS Code Chat — Progress Handoff
 
+> Historical v1/v2 handoff. For the current modular host/frontend layout, behavior and regression commands, see [README — Development](../README.md#development). File references below use their current kebab-case names; the historical implementation details and gaps are not current status.
+
 > **Date:** 2026-07-02 (v2 — major RPC + UI overhaul)
 > **Status:** Full RPC protocol coverage + professional Copilot-grade UI. Untested end-to-end in Extension Development Host.
 > **Session mode:** implement
@@ -67,9 +69,9 @@ pi-vscode-chat/
 │   └── tasks.json               # compile task
 ├── src/
 │   ├── extension.ts             # activate/deactivate, register commands
-│   ├── piRpcClient.ts           # spawn pi, JSONL I/O, event emitter
-│   ├── chatSidebarProvider.ts   # WebviewViewProvider, event bridge, model/file dialogs
-│   ├── editManager.ts           # File snapshots, edit tracking, revert
+│   ├── pi-rpc-client.ts           # spawn pi, JSONL I/O, event emitter
+│   ├── chat-sidebar-provider.ts   # WebviewViewProvider, event bridge, model/file dialogs
+│   ├── edit-manager.ts           # File snapshots, edit tracking, revert
 │   └── types.ts                 # All shared types (RPC, events, webview messages)
 ├── media/
 │   ├── style.css                # Copilot-inspired dark theme

@@ -1,4 +1,4 @@
-// Keep aligned with ../../src/imageAttachments.ts; the host revalidates all payloads.
+// Keep aligned with ../../src/image-attachments.ts; the host revalidates all payloads.
 export const IMAGE_LIMITS = { count: 4, bytes: 4 * 1024 * 1024, totalBytes: 12 * 1024 * 1024, dimension: 8000, pixels: 32000000 };
 export const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 

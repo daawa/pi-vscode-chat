@@ -1,5 +1,6 @@
 import { imageSize } from 'image-size';
-import type { PromptImage } from './types.ts';
+import { isRecord } from './value-guards.ts';
+import type { PromptImage } from './webview-types.ts';
 
 // Conservative client limits, not a guarantee of acceptance by every provider.
 export const IMAGE_LIMITS = {
@@ -42,8 +43,8 @@ export function validatePromptImages(value: unknown): PromptImage[] | undefined 
     throw new Error('Attach at most 4 images per message.');
   }
   let totalBytes = 0;
-  return value.map((image: any) => {
-    if (!image || typeof image.data !== 'string' || typeof image.mime !== 'string' ||
+  return value.map((image: unknown) => {
+    if (!isRecord(image) || typeof image.data !== 'string' || typeof image.mime !== 'string' ||
         image.data.length > 4 * Math.ceil(IMAGE_LIMITS.bytes / 3) ||
         image.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data)) {
       throw new Error('Invalid image payload: expected raw base64 data.');
