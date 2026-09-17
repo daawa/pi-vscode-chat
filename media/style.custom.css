@@ -824,11 +824,15 @@ pre:hover .code-copy { opacity: 1; }
   color: var(--error);
 }
 .icon-button.stop:hover { background: #6a91ed; color: var(--error); }
-.icon-button.stop:not(.hidden) { animation: stop-breathe 2s ease-in-out infinite; }
+.icon-button.stop:not(.hidden) {
+  animation: stop-breathe 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.icon-button.stop:hover,
+.icon-button.stop:focus-visible { animation: none; }
 
 @keyframes stop-breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  50% { opacity: 0.76; }
 }
 
 @media (prefers-reduced-motion: reduce) {
