@@ -818,8 +818,22 @@ pre:hover .code-copy { opacity: 1; }
 .icon-button.send:disabled { opacity: 0.35; cursor: default; }
 .icon-button.send:not(:disabled):hover { background: var(--hover); }
 
-.icon-button.stop { color: var(--error); }
-.icon-button.stop:hover { background: color-mix(in srgb, var(--error) 12%, transparent); }
+.icon-button.stop {
+  border-radius: 4px;
+  background: #537dde;
+  color: var(--error);
+}
+.icon-button.stop:hover { background: #6a91ed; color: var(--error); }
+.icon-button.stop:not(.hidden) { animation: stop-breathe 2s ease-in-out infinite; }
+
+@keyframes stop-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-button.stop:not(.hidden) { animation: none; }
+}
 
 .pill {
   display: flex;
