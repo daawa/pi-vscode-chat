@@ -1,6 +1,6 @@
 {
   "name": "pi-vscode-chat",
-  "displayName": "Pi Chat",
+  "displayName": "Pi",
   "description": "Chat sidebar powered by your local pi coding agent — Copilot-like, with all pi extensions, skills, multi-agent & OpenCode",
   "version": "0.2.3",
   "type": "module",
@@ -30,7 +30,7 @@
       "activitybar": [
         {
           "id": "pi-chat",
-          "title": "Pi Chat",
+          "title": "Pi",
           "icon": "$(comment-discussion)"
         }
       ]
@@ -48,7 +48,7 @@
     "viewsWelcome": [
       {
         "view": "piChat.sidebar",
-        "contents": "# Pi Chat\nChat sidebar for your local pi coding agent.\n\n[Start session](command:piChat.newSession)\n[Select model](command:piChat.selectModel)\n[Check dependencies](command:piChat.checkDependencies)"
+        "contents": "# Pi\nChat sidebar for your local pi coding agent.\n\n[Start session](command:piChat.newSession)\n[Select model](command:piChat.selectModel)\n[Check dependencies](command:piChat.checkDependencies)"
       }
     ],
     "commands": [
@@ -90,14 +90,14 @@
       },
       {
         "command": "piChat.sendSelection",
-        "title": "Pi Chat: Ask About Selection"
+        "title": "Pi: Ask About Selection"
       }
     ],
     "menus": {
       "editor/context": [
         {
           "command": "piChat.sendSelection",
-          "title": "Pi Chat: Ask About Selection",
+          "title": "Pi: Ask About Selection",
           "group": "pi"
         }
       ]
@@ -111,7 +111,7 @@
       }
     ],
     "configuration": {
-      "title": "Pi Chat",
+      "title": "Pi",
       "properties": {
         "piChat.piPath": {
           "type": "string",
