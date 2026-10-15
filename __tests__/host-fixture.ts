@@ -11,6 +11,8 @@ export const showOpenDialog = mock(async (_options: unknown): Promise<any> => un
 export const showQuickPick = mock(async (_items: any[], _options: unknown): Promise<any> => undefined);
 export const showErrorMessage = mock(async (_message: string) => undefined);
 export const executeCommand = mock(async (_command: string, ..._args: unknown[]) => undefined);
+export const openTextDocument = mock(async (uri: vscode.Uri) => ({ uri }));
+export const showTextDocument = mock(async (_document: unknown, _options: vscode.TextDocumentShowOptions) => undefined);
 export const documentClosed = new EventEmitter();
 export const contentProviders = new Set<unknown>();
 export const commandHandlers = new Map<string, (...args: any[]) => unknown>();
@@ -30,6 +32,7 @@ mock.module('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: parseUri('file:///workspace') }], textDocuments: [],
     fs: { readFile, writeFile, delete: deleteFile, stat },
+    openTextDocument,
     registerTextDocumentContentProvider: (_scheme: string, provider: unknown) => {
       contentProviders.add(provider);
       return new Disposable(() => { contentProviders.delete(provider); });
@@ -44,7 +47,15 @@ mock.module('vscode', () => ({
     joinPath: (uri: { toString(): string }, ...segments: string[]) => parseUri(`${uri.toString()}/${segments.join('/')}`),
   },
   FileType: { File: 1 }, Disposable,
-  window: { showQuickPick, showOpenDialog, showErrorMessage,
+  Range: class {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+    constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
+      this.start = { line: startLine, character: startCharacter };
+      this.end = { line: endLine, character: endCharacter };
+    }
+  },
+  window: { showQuickPick, showOpenDialog, showErrorMessage, showTextDocument,
     showWarningMessage: showErrorMessage, showInformationMessage: showErrorMessage },
   commands: {
     executeCommand,
@@ -131,4 +142,6 @@ export function resetHostFixture(): void {
   showQuickPick.mockReset(); showQuickPick.mockImplementation(async () => undefined);
   writeFile.mockClear(); deleteFile.mockClear(); showErrorMessage.mockClear(); executeCommand.mockReset();
   executeCommand.mockImplementation(async () => undefined);
+  openTextDocument.mockReset(); openTextDocument.mockImplementation(async uri => ({ uri }));
+  showTextDocument.mockReset(); showTextDocument.mockImplementation(async () => undefined);
 }

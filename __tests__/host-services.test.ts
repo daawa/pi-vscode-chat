@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import type * as vscode from 'vscode';
 import { mkdtempSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import {
   createProvider, createView, EditManager, resetHostFixture, contentProviders, documentClosed,
-  executeCommand, commandHandlers, showQuickPick,
+  executeCommand, commandHandlers, showQuickPick, openTextDocument, showTextDocument,
 } from './host-fixture.ts';
 import { registerCommands } from '../src/commands.ts';
 import { ModelService } from '../src/services/model-service.ts';
@@ -61,6 +61,41 @@ describe('shared model selection', () => {
     await provider.selectModel();
     expect(pi.setModel).not.toHaveBeenCalled();
     expect(messages).toEqual([]);
+  });
+});
+
+describe('native file navigation', () => {
+  test.each([
+    ['~/user/some-file', join(homedir(), 'user/some-file')],
+    ['~/my files/你好.ts', join(homedir(), 'my files/你好.ts')],
+    ['src/main.ts', '/workspace/src/main.ts'],
+    ['/tmp/main.ts', '/tmp/main.ts'],
+    ['src/~/main.ts', '/workspace/src/~/main.ts'],
+    ['~other/main.ts', '/workspace/~other/main.ts'],
+  ])('opens %s at the expected filesystem path', async (input, expected) => {
+    const { provider, messages } = await createProvider();
+    await provider.handleMessage({ type: 'openFile', path: input });
+    expect(messages.filter(message => message.type === 'error')).toEqual([]);
+    expect(openTextDocument).toHaveBeenCalledTimes(1);
+    expect(openTextDocument.mock.calls[0][0].fsPath).toBe(expected);
+    expect(showTextDocument).toHaveBeenCalledWith({ uri: openTextDocument.mock.calls[0][0] }, { preview: true });
+  });
+
+  test('opens home-relative paths without a workspace and preserves line/column navigation', async () => {
+    const { provider, messages } = await createProvider();
+    const { workspace } = await import('vscode');
+    const originalFolders = workspace.workspaceFolders;
+    Object.assign(workspace, { workspaceFolders: undefined });
+    try {
+      await provider.handleMessage({ type: 'openFile', path: '~/user/some-file', line: 12, column: 4 });
+      expect(messages.filter(message => message.type === 'error')).toEqual([]);
+      expect(openTextDocument).toHaveBeenCalledTimes(1);
+      expect(openTextDocument.mock.calls[0][0].fsPath).toBe(join(homedir(), 'user/some-file'));
+      expect(showTextDocument.mock.calls[0][1]).toEqual({
+        preview: true,
+        selection: { start: { line: 11, character: 3 }, end: { line: 11, character: 3 } },
+      });
+    } finally { Object.assign(workspace, { workspaceFolders: originalFolders }); }
   });
 });
 

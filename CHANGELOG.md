@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Expand `~/` file references against the extension host user's home directory before opening them, including when no workspace is open; preserve relative/absolute paths and line/column navigation.
+
 - Refactor the extension host into focused session/event controllers, services, setup actions and a Node-only RPC transport; use kebab-case TypeScript filenames and separate RPC/webview/edit contracts.
 - Isolate shutdown timers, parsers and pending requests per process; await shutdown and report asynchronous spawn errors without unhandled EventEmitter errors.
 - Preserve drafts and Undo state on cancelled session changes, serialize transitions, and discard stale history/state/stats/edit work after session changes or disposal.

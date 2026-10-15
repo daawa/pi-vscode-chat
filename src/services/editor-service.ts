@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 import type { EditManager } from '../edit-manager.ts';
 
 /** Owns native editor navigation and the lifetime of original-content diff documents. */
@@ -32,6 +33,8 @@ export class EditorService implements vscode.TextDocumentContentProvider, vscode
   }
 
   async openFile(filePath: string, line?: number, column?: number): Promise<void> {
+    // Node path/URI APIs do not perform shell-style home expansion.
+    if (filePath.startsWith('~/')) filePath = path.join(homedir(), filePath.slice(2));
     if (!path.isAbsolute(filePath)) {
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!root) return;
