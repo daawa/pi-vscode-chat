@@ -25,7 +25,7 @@ export function getHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data: https:; font-src ${webview.cspSource};">
   <link id="chat-style" rel="stylesheet" href="${customStyleUri}" data-default="${defaultStyleUri}" data-custom="${customStyleUri}">
-  <title>Pi Chat</title>
+  <title>Pi</title>
 </head>
 <body>
   <div id="app">

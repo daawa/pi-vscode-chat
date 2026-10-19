@@ -25,7 +25,7 @@ export function createConversation({ vscode, state, saveState }) {
     messagesEl.innerHTML = `
       <div id="welcome">
         <div class="welcome-logo">${ICONS.sparkle}</div>
-        <h2>Pi Chat</h2>
+        <h2>Pi</h2>
         <p>Your local pi coding agent — with all its extensions, skills and models.</p>
         <div class="welcome-hints">
           <button class="hint" data-hint="Explain the architecture of this project">Explain this project</button>
