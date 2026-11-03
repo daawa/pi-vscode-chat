@@ -117,7 +117,7 @@ export async function createProvider(historyLoaded = true, editManager?: Instanc
   };
   const messages: any[] = [];
   const workspaceState = { get: mock((_key: string): any => undefined), update: mock(async (_key: string, _value: any) => {}) };
-  const provider = new ChatSidebarProvider(parseUri('file:///extension'), pi as unknown as PiRpcClient,
+  const provider = new ChatSidebarProvider(parseUri('file:///extension'), '0.0.0-test', pi as unknown as PiRpcClient,
     edits as InstanceType<typeof EditManager>, workspaceState as unknown as vscode.Memento,
     { command: 'pi', cwd: '/workspace', env: { PI_CODING_AGENT_DIR: '/__pi-chat-test-agent__' } });
   const view = createView(messages);

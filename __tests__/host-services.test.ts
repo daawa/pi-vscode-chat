@@ -159,6 +159,11 @@ describe('host resource ownership', () => {
 });
 
 describe('source/configuration contracts', () => {
+  test('sidebar HTML renders the extension version in the footer', async () => {
+    const { view } = await createProvider();
+    expect(view.webview.html).toContain('<span id="extension-version" class="footer-version" title="pi-vscode-chat version">v0.0.0-test</span>');
+  });
+
   test('source filenames use kebab-case', () => {
     const files = readdirSync(new URL('../src/', import.meta.url), { recursive: true }) as string[];
     expect(files.filter(file => file.endsWith('.ts')).every(file => /^[a-z0-9]+(?:-[a-z0-9]+)*\.ts$/.test(basename(file)))).toBe(true);

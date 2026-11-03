@@ -19,7 +19,7 @@ html = re.sub(r'<script\b[^>]*>.*?</script>', '', html, flags=re.S)
 
 
 def load_fixture(saved_state=None):
-    fixture_html = html
+    fixture_html = html.replace('${version}', '0.0.0-test')
     for token, filename in [('defaultStyleUri', 'style.css'), ('customStyleUri', 'style.custom.css')]:
         css = (root / 'media' / filename).read_text()
         uri = js('URL.createObjectURL(new Blob([' + json.dumps(css) + '], {type: "text/css"}))')

@@ -14,7 +14,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const options = readLaunchOptions();
   const edits = new EditManager();
   const pi = new PiRpcClient(options);
-  const sidebar = new ChatSidebarProvider(context.extensionUri, pi, edits, context.workspaceState, options);
+  const sidebar = new ChatSidebarProvider(context.extensionUri, String(context.extension.packageJSON.version ?? 'unknown'), pi, edits, context.workspaceState, options);
   let disposed = false;
   const subscriptions: vscode.Disposable[] = [edits, pi, sidebar];
   const instance = {

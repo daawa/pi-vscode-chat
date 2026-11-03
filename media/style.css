@@ -897,6 +897,7 @@ pre:hover .code-copy { opacity: 1; }
 #footer-stats { display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
 #footer-stats .sep { opacity: 0.5; }
 #footer-stats .ctx.warn { color: var(--warning); }
+.footer-version { white-space: nowrap; opacity: 0.55; padding: 2px 0; }
 
 /* ══ Autocomplete ══ */
 
