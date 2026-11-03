@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-03)
 
+- Lazily respawn the pi child with its last launch arguments (`--mode rpc`, last `--session`, configured `adapterArgs`) when a request arrives after the child exited or was never started, so rebuilding or upgrading pi no longer requires reloading the window. An explicit stop or dispose disables respawn until the next start.
 - Expand `~/` file references against the extension host user's home directory before opening them, including when no workspace is open; preserve relative/absolute paths and line/column navigation.
 
 - Refactor the extension host into focused session/event controllers, services, setup actions and a Node-only RPC transport; use kebab-case TypeScript filenames and separate RPC/webview/edit contracts.

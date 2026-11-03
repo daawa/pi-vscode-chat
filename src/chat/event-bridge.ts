@@ -20,7 +20,7 @@ export class EventBridge implements vscode.Disposable {
     this.reset();
     this.session.setStreaming(false);
     this.postMessage({ type: 'agentEnd' });
-    this.postMessage({ type: 'error', message: `pi process exited (code=${code}${stderr ? `: ${stderr}` : ''}). Check "piChat.piPath" or restart the window.` });
+    this.postMessage({ type: 'error', message: `pi process exited (code=${code}${stderr ? `: ${stderr}` : ''}). The next message restarts pi.` });
   };
 
   constructor(

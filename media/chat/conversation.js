@@ -154,6 +154,10 @@ export function createConversation({ vscode, state, saveState }) {
       textEl = createElement('div', 'streaming-text');
       contentEl.appendChild(textEl);
     }
+    // Only the block currently receiving deltas may show the streaming caret.
+    document.querySelectorAll('.streaming-text.live').forEach(el => {
+      if (el !== textEl) el.classList.remove('live');
+    });
     state.accumulatedText += msg.delta;
     throttledRender(textEl, state.accumulatedText);
     textEl.classList.add('live');

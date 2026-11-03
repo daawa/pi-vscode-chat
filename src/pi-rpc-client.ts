@@ -13,8 +13,10 @@ type ClientEvents = {
   transportError: [error: Error];
 };
 
-/** Typed pi operations; process ownership and JSONL framing live in RpcTransport. */
+/** Typed pi operations; the client owns launch arguments and respawns a dead child on the
+ * next request, while process ownership and JSONL framing live in RpcTransport. */
 export class PiRpcClient extends EventEmitter<ClientEvents> {
+  private launchArgs?: string[];
   private readonly onRecord = (record: unknown) => {
     if (!isRecord(record) || typeof record.type !== 'string') return;
     // The child is the protocol boundary. Unknown/new event kinds are ignored by the bridge.
@@ -34,12 +36,26 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
 
   get isRunning(): boolean { return this.transport.isRunning; }
   start(sessionPath?: string): void {
-    this.transport.start(['--mode', 'rpc', ...(sessionPath ? ['--session', sessionPath] : []), ...(this.options.args || [])]);
+    this.launchArgs = ['--mode', 'rpc', ...(sessionPath ? ['--session', sessionPath] : []), ...(this.options.args || [])];
+    this.transport.start(this.launchArgs);
   }
-  stop(): Promise<void> { return this.transport.stop(); }
-  send(command: RpcCommand): Promise<RpcResponse> { return this.transport.request(command); }
+  async stop(): Promise<void> {
+    // An explicit stop is a lifecycle decision: no respawn until the next start().
+    this.launchArgs = undefined;
+    await this.transport.stop();
+  }
+  async send(command: RpcCommand): Promise<RpcResponse> {
+    // A child that exited or was never started is replaced with its last launch
+    // arguments, so a rebuilt pi binary is picked up without a window reload.
+    if (!this.transport.isRunning) {
+      if (!this.launchArgs) throw new Error('pi not running');
+      this.transport.start(this.launchArgs);
+    }
+    return this.transport.request(command);
+  }
 
   dispose(): void {
+    this.launchArgs = undefined;
     this.transport.off('record', this.onRecord);
     this.transport.off('exit', this.onExit);
     this.transport.off('transportError', this.onError);

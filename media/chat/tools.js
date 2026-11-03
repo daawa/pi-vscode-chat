@@ -1,6 +1,12 @@
 import { $, cleanAnsi, escapeHtml, createElement } from './dom.js';
 import { ICONS, TOOL_ICONS } from './icons.js';
 
+// The streaming caret belongs to the text block currently receiving deltas.
+// An interleaved card means that text segment has ended.
+function stopStreamingCaret() {
+  document.querySelectorAll('.streaming-text.live').forEach(el => el.classList.remove('live'));
+}
+
 export function toolIcon(name) {
   const key = (name || '').toLowerCase();
   for (const k of Object.keys(TOOL_ICONS)) {
@@ -137,6 +143,7 @@ export function createToolCards({ vscode, state, getOrCreateMessage, scrollToBot
       </div>`;
     setToolState(card, 'running');
     content.appendChild(card);
+    stopStreamingCaret();
     scrollToBottom();
   }
 
@@ -194,6 +201,7 @@ export function createToolCards({ vscode, state, getOrCreateMessage, scrollToBot
         <button data-action="revertEdit" data-edit="${id}" class="undo" title="Revert this change">Undo</button>
       </div>`;
     content.appendChild(card);
+    stopStreamingCaret();
     saveState();
     scrollToBottom();
   }

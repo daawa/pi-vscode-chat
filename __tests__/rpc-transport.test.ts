@@ -239,3 +239,48 @@ describe('JSONL framing and requests', () => {
     } finally { transport.dispose(); }
   });
 });
+
+describe('lazy respawn', () => {
+  function clientFixture() {
+    const children: FakeChild[] = [];
+    const spawn = mock(() => { const child = new FakeChild(); children.push(child); return child as unknown as ChildProcess; });
+    const options = { command: '/fake/pi', args: ['--verbose'], cwd: '/workspace', env: { PATH: '/fake/bin' },
+      requestTimeoutMs: 50, shutdownTimeoutMs: 10 };
+    const transport = new RpcTransport(options, spawn);
+    fixtures.push({ transport, children });
+    return { client: new PiRpcClient(options, transport), children, spawn };
+  }
+
+  test('a request respawns the exited child with its last launch arguments', async () => {
+    const { client, children, spawn } = clientFixture();
+    client.start('/sessions/one.jsonl');
+    children[0].emit('exit', 1, null);
+    expect(client.isRunning).toBe(false);
+    const pending = client.send({ type: 'get_state' });
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls.at(-1)?.[1]).toEqual(['--mode', 'rpc', '--session', '/sessions/one.jsonl', '--verbose']);
+    children[1].reply(0, {});
+    expect((await pending).success).toBe(true);
+  });
+
+  test('requests fail without a previous start, and an explicit stop disables respawn', async () => {
+    const { client, children, spawn } = clientFixture();
+    await expect(client.send({ type: 'get_state' })).rejects.toThrow('pi not running');
+    expect(spawn).not.toHaveBeenCalled();
+    client.start();
+    const stopped = client.stop();
+    children[0].emit('exit', 0, null);
+    await stopped;
+    await expect(client.send({ type: 'get_state' })).rejects.toThrow('pi not running');
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test('dispose disables respawn', async () => {
+    const { client, children, spawn } = clientFixture();
+    client.start();
+    client.dispose();
+    children[0].emit('exit', 0, null);
+    await expect(client.send({ type: 'get_state' })).rejects.toThrow('pi not running');
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+});
