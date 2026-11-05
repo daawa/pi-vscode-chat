@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 
-/** Shell HTML for the sidebar webview; `version` is the extension's package.json version. */
-export function getHtml(webview: vscode.Webview, extensionUri: vscode.Uri, version: string): string {
+/** Shell HTML for the sidebar webview. */
+export function getHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const defaultStyleUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'media', 'style.css'),
   );
@@ -102,7 +102,6 @@ export function getHtml(webview: vscode.Webview, extensionUri: vscode.Uri, versi
             <button id="btn-style" class="footer-link" title="Select chat style">🎨 Style</button>
           </div>
           <div id="footer-stats" title="Session usage"></div>
-          <span id="extension-version" class="footer-version" title="pi-vscode-chat version">v${version}</span>
         </div>
       </div>
     </div>

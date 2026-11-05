@@ -28,7 +28,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly version: string,
     private readonly pi: PiRpcClient,
     private readonly edits: EditManager,
     workspaceState: vscode.Memento,
@@ -52,7 +51,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
     };
-    view.webview.html = getHtml(view.webview, this.extensionUri, this.version);
+    view.webview.html = getHtml(view.webview, this.extensionUri);
     this.viewSubscriptions.push(
       view.webview.onDidReceiveMessage((message: unknown) => {
         if (isRecord(message) && typeof message.type === 'string') void this.handleMessage(message as WebviewMessage);
