@@ -56,6 +56,7 @@ export type WebviewOutMessage =
   | { type: 'sessionsList'; sessions: SessionInfo[] }
   | { type: 'agentStart' }
   | { type: 'agentEnd' }
+  | { type: 'turnStart' }
   | { type: 'textDelta'; messageId: string; delta: string }
   | { type: 'thinkingDelta'; messageId: string; blockIndex: number; delta: string }
   | { type: 'thinkingEnd'; messageId: string; blockIndex: number; content: string }

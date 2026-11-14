@@ -173,6 +173,22 @@ export function createConversation({ vscode, state, saveState }) {
     state.accumulatedText = '';
   }
 
+  /** A new assistant turn started. A steer delivered between turns inserts a user
+   *  message after the current assistant bubble; the reply to it must render in a
+   *  fresh bubble BELOW that message, not continue the old bubble above it.
+   *  Plain tool-loop turns (no interleaved user message) keep the same bubble. */
+  function handleTurnStart() {
+    const current = state.currentMessageId ? document.querySelector(`[data-msg-id="${state.currentMessageId}"]`) : null;
+    if (!current) return; // no bubble yet — the next delta appends at the bottom anyway
+    const siblings = Array.from(messagesEl.children);
+    const userInterleaved = siblings.slice(siblings.indexOf(current) + 1)
+      .some(el => el.classList && el.classList.contains('user'));
+    if (userInterleaved) {
+      flushRender(); // settle the old bubble's pending streamed text first
+      beginTurn();
+    }
+  }
+
   function endTurn() {
     flushRender();
     document.querySelectorAll('.streaming-text').forEach(el => {
@@ -226,5 +242,5 @@ export function createConversation({ vscode, state, saveState }) {
   const tools = createToolCards({ vscode, state, getOrCreateMessage, scrollToBottom, saveState });
   const { renderHistory } = createHistoryRenderer({ messagesEl, state, addUserMessage, renderWelcome, scrollToBottom, saveState });
 
-  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, clear, removeRejectedMessage, settleQueuedMessages, removeQueuedMessages, enableAutoScroll: () => { autoScroll = true; } };
+  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, handleTurnStart, clear, removeRejectedMessage, settleQueuedMessages, removeQueuedMessages, enableAutoScroll: () => { autoScroll = true; } };
 }

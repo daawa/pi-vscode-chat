@@ -85,6 +85,12 @@ export class EventBridge implements vscode.Disposable {
         this.settleRun();
         break;
 
+      case 'turn_start':
+        // Turn boundaries let the webview split the assistant bubble when a steer
+        // was interleaved, so the steered reply renders below the user message.
+        this.postMessage({ type: 'turnStart' });
+        break;
+
       case 'message_update':
         this.handleMessageUpdate(event);
         break;

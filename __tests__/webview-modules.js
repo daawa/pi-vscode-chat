@@ -190,6 +190,29 @@
     assert(!button.disabled, 'Composer stayed locked after handled prompt');
   });
 
+  test('a steer between turns starts a new assistant bubble below the user message', () => {
+    send({ type: 'agentStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'First turn answer.' });
+    send({ type: 'userMessage', text: 'say BANANA instead', queued: true });
+    send({ type: 'queueUpdate', steering: [], followUp: [] }); // steer consumed
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'BANANA' });
+    send({ type: 'agentEnd' }); // flush throttled renders
+    const bubbles = document.querySelectorAll('.message.assistant');
+    assert(bubbles.length === 2, 'Steered reply continued in the old bubble');
+    assert(bubbles[1].textContent.includes('BANANA'), 'New bubble missing the steered reply');
+    assert(!bubbles[0].textContent.includes('BANANA'), 'Old bubble contaminated by the steered reply');
+    const order = Array.from(document.querySelectorAll('.message')).map(el => el.className);
+    assert(order[0].includes('assistant') && order[1].includes('user') && order[2].includes('assistant'),
+      `Conversation order wrong: ${order.join(' | ')}`);
+    // A plain tool-loop turn (no interleaved user message) keeps the same bubble.
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'More detail.' });
+    send({ type: 'agentEnd' });
+    assert(document.querySelectorAll('.message.assistant').length === 2, 'Tool-loop turn split the bubble needlessly');
+    assert(bubbles[1].textContent.includes('More detail.'), 'Tool-loop continuation lost');
+  });
+
   test('plain file references flow from attachment controller into the submitted prompt', () => {
     document.getElementById('btn-attach').click();
     const requestId = testPostedMessages.at(-1).requestId;

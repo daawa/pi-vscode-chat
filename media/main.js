@@ -63,6 +63,9 @@ window.addEventListener('message', ({ data: msg }) => {
       conversation.beginTurn();
       composer.updateStreamingState(true);
       break;
+    case 'turnStart':
+      conversation.handleTurnStart();
+      break;
     case 'agentEnd':
       composer.updateStreamingState(false);
       conversation.endTurn();
