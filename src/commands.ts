@@ -30,13 +30,25 @@ export function registerCommands(
         placeHolder: 'e.g. Focus on code changes',
       });
       if (instructions === undefined) return; // cancelled
-      // Progress streams via compaction_start/end events (status chip); a failed or
-      // user-aborted compaction is a warning, not an extension error.
-      if (!await pi.compact(instructions.trim() || undefined)) {
-        void vscode.window.showWarningMessage('Pi Chat: compaction did not complete (aborted or failed).');
+      const state = await pi.getState().catch(() => null);
+      if (state?.isStreaming) {
+        void vscode.window.showWarningMessage('Pi Chat: wait for the current run to finish before compacting.');
         return;
       }
-      void vscode.window.showInformationMessage('Pi Chat: conversation compacted.');
+      // Progress is visible via the compaction status chip; this notification makes the
+      // (potentially minutes-long) wait cancellable — aborting the session aborts
+      // compaction — and bounds the wait to the request timeout instead of hanging silent.
+      const outcome = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Pi Chat: compacting conversation…', cancellable: true },
+        (_progress, token) => new Promise<string>(resolve => {
+          token.onCancellationRequested(() => { void pi.abort().catch(() => {}); });
+          void pi.compact(instructions.trim() || undefined)
+            .then(ok => resolve(ok ? 'compacted' : 'incomplete'))
+            .catch(() => resolve('failed'));
+        }),
+      );
+      if (outcome === 'compacted') void vscode.window.showInformationMessage('Pi Chat: conversation compacted.');
+      else if (outcome === 'incomplete') void vscode.window.showWarningMessage('Pi Chat: compaction did not complete (aborted or failed).');
     }),
     command('piChat.renameSession', async () => {
       const state = await pi.getState().catch(() => null);

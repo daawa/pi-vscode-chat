@@ -172,13 +172,18 @@ export class SessionController implements vscode.Disposable {
         // Drop the optimistic queued bubble and keep the draft for re-editing.
         this.postMessage({ type: 'promptHandled', submissionId });
       } else {
-        if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true });
-        // "handled" for an idle prompt: no agent run starts, so no agent_end or
-        // agent_settled will ever arrive for it.
-        if (disposition === 'handled' && started) {
-          started = false;
-          this.setStreaming(false);
-          this.postMessage({ type: 'agentEnd' });
+        // queued:true tells the webview the prompt really entered pi's queue, so its
+        // bubble can be reconciled later; anything else settles the bubble at once.
+        if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true, queued: disposition === 'queued' });
+        // "handled" for an idle prompt or command: no agent run starts, so no
+        // agent_end or agent_settled will ever arrive for it. init(idle) unlocks
+        // the composer; the handler may have done session-visible work.
+        if (disposition === 'handled') {
+          if (started) {
+            started = false;
+            this.setStreaming(false);
+          }
+          void this.sendStats();
         }
       }
       if (isCommand) await this.sendState();
@@ -212,14 +217,14 @@ export class SessionController implements vscode.Disposable {
     // superseded request is retried on the next refresh instead of being lost.
     const modelKey = state?.model ? `${state.model.provider}/${state.model.id}` : null;
     if (modelKey !== this.thinkingLevelsModel) {
-      let levels: string[] | null = null;
-      let failed = false;
+      // null from the client means the command failed or is unsupported (older pi);
+      // don't commit, so the next refresh retries instead of falling back forever.
+      let levels: string[] | null = modelKey ? null : [];
       if (modelKey) {
-        try { levels = await this.pi.getAvailableThinkingLevels(); }
-        catch { failed = true; }
+        try { levels = await this.pi.getAvailableThinkingLevels(); } catch { levels = null; }
       }
       if (this.disposed || requestId !== this.stateRequestId) return;
-      if (!failed) {
+      if (levels !== null) {
         this.thinkingLevelsModel = modelKey;
         this.thinkingLevels = levels;
       }

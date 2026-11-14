@@ -83,13 +83,15 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
     return { steering: stringList(data?.steering), followUp: stringList(data?.followUp) };
   }
 
-  /** Thinking levels supported by the current model; ["off"] for non-reasoning models. */
-  async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
-    const data = responseData(await this.send({ type: 'get_available_thinking_levels' }));
-    const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-    return Array.isArray(data?.levels)
-      ? data.levels.filter((level): level is ThinkingLevel => (levels as readonly string[]).includes(level))
-      : [];
+  /** Thinking levels supported by the current model; ["off"] for non-reasoning models.
+   * Returns null when the command fails or is unsupported (older pi), so callers can
+   * distinguish "unavailable" from a real (empty) list and retry later. Unknown level
+   * names are passed through for forward compatibility. */
+  async getAvailableThinkingLevels(): Promise<string[] | null> {
+    const response = await this.send({ type: 'get_available_thinking_levels' });
+    const data = responseData(response);
+    if (!response.success || !Array.isArray(data?.levels)) return null;
+    return data.levels.filter((level): level is string => typeof level === 'string' && level.length > 0);
   }
 
   /** Set a display name for the current session. */

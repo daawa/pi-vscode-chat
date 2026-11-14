@@ -12,7 +12,7 @@ describe('image input bridge', () => {
     await provider.handleMessage({ type: 'prompt', submissionId: 'send-1', text: '', images, streaming: !streaming });
     expect(pi.prompt).toHaveBeenCalledWith('', images, streaming ? 'steer' : undefined);
     expect(messages.find(m => m.type === 'userMessage')).toMatchObject({ text: '', images, queued: streaming, submissionId: 'send-1' });
-    expect(messages.find(m => m.type === 'promptResult')).toEqual({ type: 'promptResult', submissionId: 'send-1', success: true });
+    expect(messages.find(m => m.type === 'promptResult')).toMatchObject({ type: 'promptResult', submissionId: 'send-1', success: true });
   });
 
   test('exposes image capability in live model state', async () => {

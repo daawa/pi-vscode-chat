@@ -53,6 +53,37 @@ describe('run lifecycle events', () => {
     expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
   });
 
+  test('compaction between runs cancels the fallback settle (work continues)', async () => {
+    const { pi, messages } = await createProvider();
+    pi.emit('event', { type: 'agent_start' });
+    pi.emit('event', { type: 'agent_end', messages: [] }); // overflow → compaction → retry
+    pi.emit('event', { type: 'compaction_start', reason: 'overflow' });
+    await sleep(320);
+    expect(messages.some(m => m.type === 'agentEnd')).toBe(false); // compaction keeps the run alive
+    pi.emit('event', { type: 'compaction_end', reason: 'overflow', aborted: false, willRetry: true });
+    pi.emit('event', { type: 'agent_start' });
+    pi.emit('event', { type: 'agent_settled', aborted: false });
+    expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
+  });
+
+  test('reset re-probes agent_settled support and returns the UI to idle', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.emit('event', { type: 'agent_settled', aborted: false }); // settledSeen = true
+    await provider.session.setStreaming(true);
+    messages.length = 0;
+    provider.events.reset(); // session change / respawn
+    await sleep(20); // let reset's async state refresh land
+    // The controller returned to idle.
+    expect(messages.filter(m => m.type === 'init').at(-1)?.state).toBe('idle');
+    // settledSeen was reset: the next agent_end uses the short (250ms) grace again,
+    // not the long one, so an unproven build still settles promptly.
+    pi.emit('event', { type: 'agent_start' });
+    messages.length = 0;
+    pi.emit('event', { type: 'agent_end', messages: [] });
+    await sleep(320);
+    expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
+  });
+
   test('thinking_end authoritative content uses the current wire field', async () => {
     const { pi, messages } = await createProvider();
     pi.emit('event', { type: 'message_update', assistantMessageEvent: { type: 'thinking_end', contentIndex: 1, content: 'final thought' } });
@@ -127,6 +158,23 @@ describe('queue and abort semantics', () => {
     expect(messages.some(m => m.type === 'promptHandled' && m.submissionId === 'sub-1')).toBe(true);
     expect(messages.some(m => m.type === 'promptResult')).toBe(false);
     expect(messages.some(m => m.type === 'agentEnd')).toBe(false); // nothing to settle
+  });
+
+  test('a queued steer is acknowledged with queued:true for bubble reconciliation', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.prompt.mockResolvedValueOnce({ success: true, data: { disposition: 'queued' } });
+    await provider.handleMessage({ type: 'prompt', text: 'steer this', streaming: true, submissionId: 'sub-2' });
+    expect(messages.find(m => m.type === 'promptResult')).toMatchObject({ submissionId: 'sub-2', success: true, queued: true });
+  });
+
+  test('an idle prompt consumed by a handler settles via init, without a manual agentEnd', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.prompt.mockResolvedValueOnce({ success: true, data: { disposition: 'handled' } });
+    pi.getSessionStats.mockResolvedValueOnce({ userMessages: 1, assistantMessages: 0, toolCalls: 0, totalMessages: 1 });
+    await provider.handleMessage({ type: 'prompt', text: '/custom', submissionId: 'sub-3' });
+    expect(messages.find(m => m.type === 'promptResult')).toMatchObject({ success: true, queued: false });
+    expect(messages.some(m => m.type === 'agentEnd')).toBe(false); // no synthetic settle
+    expect(messages.some(m => m.type === 'stats')).toBe(true); // stats refreshed
   });
 
   test('followUp behavior survives a stale webview streaming flag', async () => {

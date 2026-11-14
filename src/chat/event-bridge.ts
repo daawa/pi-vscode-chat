@@ -48,6 +48,11 @@ export class EventBridge implements vscode.Disposable {
     this.toolCalls.clear();
     this.clearSettleTimer();
     this.runSettled = true;
+    // A respawned pi child may be a different build; re-probe for agent_settled.
+    this.settledSeen = false;
+    // Defensive: every reset path (exit, session change, dispose) must return the UI
+    // to idle. Callers also refresh state themselves; the guard here is idempotent.
+    this.session.setStreaming(false);
   }
   dispose(): void {
     this.disposed = true;
@@ -72,10 +77,10 @@ export class EventBridge implements vscode.Disposable {
 
       case 'agent_end':
         // agent_end closes one low-level run, but retries, overflow recovery,
-        // compaction, or queued steering/follow-up can start another. Once pi has
-        // proven it emits agent_settled, that event is the sole idle marker; older
-        // pi builds fall back to a short grace period after the last agent_end.
-        if (event.willRetry || this.settledSeen) break;
+        // compaction, or queued steering/follow-up can start another. agent_settled
+        // is the definitive idle marker; the fallback grace below covers pi builds
+        // or failure paths where it never arrives.
+        if (event.willRetry) break; // an automatic retry follows immediately
         this.scheduleSettle();
         break;
 
@@ -119,6 +124,7 @@ export class EventBridge implements vscode.Disposable {
         break;
 
       case 'auto_retry_start':
+        this.clearSettleTimer(); // more work is coming; keep the UI streaming
         this.postMessage({
           type: 'retryStatus',
           text: `Transient error — retrying (${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s…`,
@@ -144,6 +150,7 @@ export class EventBridge implements vscode.Disposable {
         break;
 
       case 'compaction_start':
+        this.clearSettleTimer(); // compaction continues the session-level run
         this.postMessage({ type: 'compactionStatus', text: 'Compacting conversation context…' });
         break;
 
@@ -182,10 +189,16 @@ export class EventBridge implements vscode.Disposable {
 
   private scheduleSettle(): void {
     if (this.settleTimer || this.disposed) return;
+    // Before pi proves it emits agent_settled, settle quickly (old-build fallback).
+    // Afterwards use a long grace: normal runs settle on agent_settled within
+    // milliseconds, so the timer only fires when settled truly never arrives
+    // (pi hang, crash without exit, protocol gap) — recovering the UI instead of
+    // locking the composer forever.
+    const delay = this.settledSeen ? 15_000 : 250;
     this.settleTimer = setTimeout(() => {
       this.settleTimer = undefined;
       this.settleRun();
-    }, 250);
+    }, delay);
     this.settleTimer.unref?.();
   }
 

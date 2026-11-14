@@ -111,6 +111,7 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
       showError(msg.error || 'Prompt rejected. Your draft has been preserved.');
       updateComposerState();
     }
+    flushBufferedInput();
     inputEl.focus();
   }
 
@@ -121,15 +122,41 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     pendingSubmission = null;
     removeRejectedMessage(msg.submissionId);
     updateComposerState();
+    flushBufferedInput();
     inputEl.focus();
   }
 
-  function setInputText(text, append) {
-    if (pendingSubmission) return;
+  // ── Host-driven draft edits (abort restore, insertPrompt) ──
+
+  let bufferedInput = null; // { text, append } held while a submission is being acknowledged
+
+  function applyInputText(text, append) {
     inputEl.value = append && inputEl.value ? inputEl.value + '\n' + text : text;
     inputEl.focus();
     inputEl.dispatchEvent(new Event('input'));
   }
+
+  function setInputText(text, append) {
+    if (pendingSubmission) {
+      // The composer is locked awaiting RPC acknowledgment (e.g. a steer being
+      // queued). Buffer the host text and apply it once unlocked — dropping it
+      // here would lose restored queue drafts on abort.
+      bufferedInput = bufferedInput
+        ? { text: bufferedInput.text + '\n\n' + text, append: bufferedInput.append || !!append }
+        : { text, append: !!append };
+      return;
+    }
+    applyInputText(text, append);
+  }
+
+  function flushBufferedInput() {
+    if (!bufferedInput || pendingSubmission) return;
+    const { text, append } = bufferedInput;
+    bufferedInput = null;
+    applyInputText(text, append);
+  }
+
+  function discardBufferedInput() { bufferedInput = null; }
 
   function setModelSupportsImages(value) {
     modelSupportsImages = !!value;
@@ -168,5 +195,5 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
   btnAttach.addEventListener('click', attachments.selectFiles);
   bindDropInput({ inputEl, attachments, isLocked });
 
-  return { attachments, autocomplete, isLocked, updateStreamingState, clear: clearComposer, setInputText, setModelSupportsImages, setHistoryLoading, handlePromptResult, handlePromptHandled };
+  return { attachments, autocomplete, isLocked, updateStreamingState, clear: clearComposer, setInputText, discardBufferedInput, setModelSupportsImages, setHistoryLoading, handlePromptResult, handlePromptHandled };
 }

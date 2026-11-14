@@ -36,7 +36,14 @@ window.addEventListener('message', ({ data: msg }) => {
     case 'historyLoading': composer.setHistoryLoading(msg.loading); break;
     case 'sessionsList': shell.renderSessions(msg); break;
     case 'userMessage': conversation.addUserMessage(msg.text, msg.queued, msg.images, msg.submissionId); break;
-    case 'promptResult': composer.handlePromptResult(msg); break;
+    case 'promptResult':
+      composer.handlePromptResult(msg);
+      // The host tells us whether pi actually queued the prompt (disposition "queued").
+      if (msg.success) {
+        if (msg.queued) conversation.confirmQueuedSubmission(msg.submissionId);
+        else conversation.settleQueuedSubmission(msg.submissionId);
+      }
+      break;
     case 'promptHandled': composer.handlePromptHandled(msg); break;
     case 'textDelta': conversation.appendTextDelta(msg); break;
     case 'thinkingDelta': conversation.appendThinkingDelta(msg.messageId, msg.blockIndex, msg.delta); break;
@@ -54,7 +61,7 @@ window.addEventListener('message', ({ data: msg }) => {
       conversation.settleQueuedMessages(msg.steering, msg.followUp);
       break;
     case 'queueCleared':
-      conversation.removeQueuedMessages(msg.steering, msg.followUp);
+      conversation.removeQueuedMessages();
       panels.renderQueue([], []);
       break;
     case 'retryStatus': panels.updateStatus('__retry', msg.text || undefined); break;
@@ -73,12 +80,13 @@ window.addEventListener('message', ({ data: msg }) => {
       break;
     case 'sessionCleared':
       composer.clear();
+      composer.discardBufferedInput();
       shell.renderSession();
       panels.clear();
       conversation.clear();
       break;
     case 'attachmentsSelected': void composer.attachments.receiveAttachments(msg); break;
-    case 'clearComposer': composer.clear(); break;
+    case 'clearComposer': composer.clear(); composer.discardBufferedInput(); break;
     case 'fileResults': composer.autocomplete.showFileResults(msg.results); break;
     case 'setInputText': composer.setInputText(msg.text, msg.append); break;
     case 'extensionUiRequest':

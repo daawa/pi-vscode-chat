@@ -81,10 +81,9 @@ export function createConversation({ vscode, state, saveState }) {
     const content = createElement('div', 'message-content');
     content.textContent = text;
     if (submissionId) msg.dataset.submissionId = submissionId;
-    if (queued) {
-      // Raw text key used to reconcile bubbles with the pi queue (queue_update/queueCleared).
-      msg.dataset.queuedText = text;
-    }
+    // Queued bubbles stay "unconfirmed" until the host acknowledges the prompt
+    // (promptResult queued:true); only confirmed bubbles are reconciled with
+    // pi's queue, so an earlier queue_update can never settle a fresh bubble.
     if (images.length) {
       const gallery = createElement('div', 'message-images');
       images.forEach(image => {
@@ -176,14 +175,15 @@ export function createConversation({ vscode, state, saveState }) {
   /** A new assistant turn started. A steer delivered between turns inserts a user
    *  message after the current assistant bubble; the reply to it must render in a
    *  fresh bubble BELOW that message, not continue the old bubble above it.
-   *  Plain tool-loop turns (no interleaved user message) keep the same bubble. */
+   *  Still-queued bubbles are ignored: their message has not been delivered yet.
+   *  Plain tool-loop turns (no interleaved delivered user message) keep the bubble. */
   function handleTurnStart() {
     const current = state.currentMessageId ? document.querySelector(`[data-msg-id="${state.currentMessageId}"]`) : null;
     if (!current) return; // no bubble yet — the next delta appends at the bottom anyway
     const siblings = Array.from(messagesEl.children);
-    const userInterleaved = siblings.slice(siblings.indexOf(current) + 1)
-      .some(el => el.classList && el.classList.contains('user'));
-    if (userInterleaved) {
+    const userDelivered = siblings.slice(siblings.indexOf(current) + 1)
+      .some(el => el.classList && el.classList.contains('user') && !el.classList.contains('queued'));
+    if (userDelivered) {
       flushRender(); // settle the old bubble's pending streamed text first
       beginTurn();
     }
@@ -216,31 +216,51 @@ export function createConversation({ vscode, state, saveState }) {
 
   // ── Queue reconciliation (pi queue_update / queueCleared) ──
 
-  /** A queued bubble whose text is no longer in the pi queue was consumed by a run:
-   *  settle it into a normal sent message instead of leaving it dashed forever. */
-  function settleQueuedMessages(steering = [], followUp = []) {
-    const pending = new Set([...steering, ...followUp]);
-    document.querySelectorAll('.message.user.queued').forEach(el => {
-      if (el.dataset.queuedText === undefined || pending.has(el.dataset.queuedText)) return;
-      el.classList.remove('queued');
-      delete el.dataset.queuedText;
-      const tag = el.querySelector('.queued-tag');
-      if (tag) tag.remove();
-      saveState();
-    });
+  function settleQueuedBubble(el) {
+    el.classList.remove('queued');
+    delete el.dataset.queuedConfirmed;
+    const tag = el.querySelector('.queued-tag');
+    if (tag) tag.remove();
+    saveState();
   }
 
-  /** Remove the bubbles for messages dropped by clear_queue; their text returns to the composer. */
-  function removeQueuedMessages(steering = [], followUp = []) {
-    const dropped = new Set([...steering, ...followUp]);
-    document.querySelectorAll('.message.user.queued').forEach(el => {
-      if (dropped.has(el.dataset.queuedText)) el.remove();
-    });
+  /** The prompt for this bubble was acknowledged as queued (disposition "queued"):
+   *  from now on it is reconciled against pi's queue. */
+  function confirmQueuedSubmission(submissionId) {
+    const el = document.querySelector(`[data-submission-id="${submissionId}"]`);
+    if (el && el.classList.contains('queued')) el.dataset.queuedConfirmed = 'true';
+  }
+
+  /** The prompt was acknowledged but never queued (e.g. it started a run because the
+   *  streaming flag was stale): settle the bubble immediately instead of leaving it dashed. */
+  function settleQueuedSubmission(submissionId) {
+    const el = document.querySelector(`[data-submission-id="${submissionId}"]`);
+    if (el && el.classList.contains('queued')) settleQueuedBubble(el);
+  }
+
+  /** Reconcile confirmed queued bubbles with the current pi queue. The pending queue
+   *  entries correspond to the most recent confirmed bubbles, so everything older was
+   *  consumed by a run. Matching is count-based, not text-based: pi may store
+   *  transformed text (expanded skills/templates, inline attachments). */
+  function settleQueuedMessages(steering = [], followUp = []) {
+    const pendingCount = (steering || []).length + (followUp || []).length;
+    const confirmed = [...document.querySelectorAll('.message.user.queued')]
+      .filter(el => el.dataset.queuedConfirmed === 'true');
+    confirmed.slice(0, Math.max(0, confirmed.length - pendingCount)).forEach(settleQueuedBubble);
+  }
+
+  /** Remove the bubbles for messages dropped by clear_queue. A bubble that is both
+   *  confirmed and still queued was in pi's queue when it was cleared, whatever text
+   *  pi stored for it; their text returns to the composer via setInputText. */
+  function removeQueuedMessages() {
+    [...document.querySelectorAll('.message.user.queued')]
+      .filter(el => el.dataset.queuedConfirmed === 'true')
+      .forEach(el => el.remove());
     saveState();
   }
 
   const tools = createToolCards({ vscode, state, getOrCreateMessage, scrollToBottom, saveState });
   const { renderHistory } = createHistoryRenderer({ messagesEl, state, addUserMessage, renderWelcome, scrollToBottom, saveState });
 
-  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, handleTurnStart, clear, removeRejectedMessage, settleQueuedMessages, removeQueuedMessages, enableAutoScroll: () => { autoScroll = true; } };
+  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, handleTurnStart, clear, removeRejectedMessage, confirmQueuedSubmission, settleQueuedSubmission, settleQueuedMessages, removeQueuedMessages, enableAutoScroll: () => { autoScroll = true; } };
 }

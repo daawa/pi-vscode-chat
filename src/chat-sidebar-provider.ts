@@ -75,7 +75,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
   }
 
   /** Drop queued messages and put their text back into the composer.
-   * Used by both interactive abort (Esc) and the queue bar's clear button. */
+   * Used by both interactive abort (Esc) and the queue bar's clear button.
+   * Note: clear_queue returns text only, so images attached to queued messages
+   * cannot be restored — they are consumed with the queued message itself. */
   private restoreQueueDrafts(cleared: Promise<{ steering: string[]; followUp: string[] }>): void {
     void cleared.then(queue => {
       if (this.disposed || (!queue.steering.length && !queue.followUp.length)) return;
