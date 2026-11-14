@@ -2,7 +2,7 @@
   "name": "pi-vscode-chat",
   "displayName": "Pi",
   "description": "Chat sidebar powered by your local pi coding agent — Copilot-like, with all pi extensions, skills, multi-agent & OpenCode",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "publisher": "iqbalabiyoga",
   "license": "MIT",
@@ -87,6 +87,18 @@
       {
         "command": "piChat.abort",
         "title": "Pi: Abort Current Task"
+      },
+      {
+        "command": "piChat.compact",
+        "title": "Pi: Compact Conversation"
+      },
+      {
+        "command": "piChat.renameSession",
+        "title": "Pi: Rename Session"
+      },
+      {
+        "command": "piChat.exportHtml",
+        "title": "Pi: Export Session as HTML"
       },
       {
         "command": "piChat.sendSelection",

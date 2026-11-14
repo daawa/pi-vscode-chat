@@ -6,6 +6,7 @@ import { bindDropInput } from './drop-input.js';
 export function createComposer({ vscode, state, showError, removeRejectedMessage, enableAutoScroll }) {
   const inputEl = $('input');
   const sendBtn = $('btn-send');
+  const followupBtn = $('btn-followup');
   const abortBtn = $('btn-abort');
   const btnAttach = $('btn-attach');
   const btnNew = $('btn-new');
@@ -30,6 +31,8 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     const unsupported = attachments.getItems().some(a => a.type === 'image') && !modelSupportsImages;
     sendBtn.disabled = !canSubmit();
     sendBtn.classList.toggle('hidden', state.isStreaming && !hasContent);
+    // While a run is active, offer queuing the draft to run after it finishes.
+    followupBtn?.classList.toggle('hidden', !state.isStreaming || !hasContent || locked);
     inputEl.readOnly = locked;
     btnAttach.disabled = locked;
     btnNew.disabled = !!pendingSubmission;
@@ -67,7 +70,8 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
 
   // ── Send ──
 
-  function sendMessage() {
+  /** behavior: undefined = default (steer while streaming), 'followUp' = queue after the current run. */
+  function sendMessage(behavior) {
     if (!canSubmit()) return;
     const text = inputEl.value.trim();
 
@@ -95,7 +99,7 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     autocomplete.hide();
     updateComposerState();
     enableAutoScroll();
-    vscode.postMessage({ type: 'prompt', submissionId: pendingSubmission, text: formattedText, images, streaming: wasStreaming });
+    vscode.postMessage({ type: 'prompt', submissionId: pendingSubmission, text: formattedText, images, streaming: wasStreaming, ...(behavior ? { behavior } : {}) });
   }
 
   function handlePromptResult(msg) {
@@ -148,7 +152,8 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
       vscode.postMessage({ type: 'abort' });
     }
   });
-  sendBtn.addEventListener('click', sendMessage);
+  sendBtn.addEventListener('click', () => sendMessage());
+  followupBtn?.addEventListener('click', () => sendMessage('followUp'));
   abortBtn.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
   btnAttach.addEventListener('click', attachments.selectFiles);
   bindDropInput({ inputEl, attachments, isLocked });

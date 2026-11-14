@@ -4,6 +4,7 @@ import type { EditManager } from '../edit-manager.ts';
 import type { EditRecord } from '../edit-types.ts';
 import type { PostMessage, PromptImage } from '../webview-types.ts';
 import { validatePromptImages } from '../image-attachments.ts';
+import { responseDisposition } from '../rpc-types.ts';
 import { LAST_SESSION_FILE_STATE_KEY } from '../configuration.ts';
 
 /** Owns all prompt/history/session guards; no lifecycle flags live in the view. */
@@ -18,6 +19,8 @@ export class SessionController implements vscode.Disposable {
   private transition?: Promise<void>;
   private disposed = false;
   private epoch = 0;
+  private thinkingLevels: string[] | null = null;
+  private thinkingLevelsModel: string | null = null;
 
   constructor(
     private readonly pi: PiRpcClient,
@@ -122,7 +125,7 @@ export class SessionController implements vscode.Disposable {
     } finally { this.promptPending = false; }
   }
 
-  async submit(text: string, images?: PromptImage[], streaming?: boolean, submissionId?: string): Promise<void> {
+  async submit(text: string, images?: PromptImage[], streaming?: boolean, submissionId?: string, behavior: 'steer' | 'followUp' = 'steer'): Promise<void> {
     if (this.rejectWhileBusy(submissionId)) return;
     this.promptPending = true;
     let started = false;
@@ -152,11 +155,17 @@ export class SessionController implements vscode.Disposable {
         await this.edits.snapshotWorkspace();
       }
       if (this.disposed) return;
-      const behavior = streaming && (!isCommand || !!images?.length) ? 'steer' : undefined;
-      const result = await this.pi.prompt(text, images, behavior);
+      const result = await this.pi.prompt(text, images, streaming && (!isCommand || !!images?.length) ? behavior : undefined);
       if (this.disposed) return;
       if (!result.success) throw new Error(result.error || 'Failed to send prompt to pi');
       if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true });
+      // "handled" means an extension or input handler consumed the prompt: no agent
+      // run starts, so no agent_end/agent_settled will ever arrive for it.
+      if (responseDisposition(result) === 'handled' && started) {
+        started = false;
+        this.setStreaming(false);
+        this.postMessage({ type: 'agentEnd' });
+      }
       if (isCommand) await this.sendState();
     } catch (err) {
       if (this.disposed) return;
@@ -183,12 +192,20 @@ export class SessionController implements vscode.Disposable {
     if (state?.sessionFile) {
       void Promise.resolve(this.workspaceState.update(LAST_SESSION_FILE_STATE_KEY, state.sessionFile)).catch(console.warn);
     }
+    // Thinking levels are model-scoped; refetch only when the model changes.
+    const modelKey = state?.model ? `${state.model.provider}/${state.model.id}` : null;
+    if (modelKey !== this.thinkingLevelsModel) {
+      this.thinkingLevelsModel = modelKey;
+      this.thinkingLevels = modelKey ? await this.pi.getAvailableThinkingLevels().catch(() => null) : null;
+      if (this.disposed || requestId !== this.stateRequestId) return;
+    }
     this.postMessage({
       type: 'init',
       model: state?.model ? `${state.model.provider}/${state.model.id}` : 'unknown',
       modelReasoning: !!state?.model?.reasoning,
       modelSupportsImages: !!state?.model?.input?.includes('image'),
       thinkingLevel: state?.thinkingLevel || 'off',
+      ...(this.thinkingLevels?.length ? { thinkingLevels: this.thinkingLevels } : {}),
       state: this.isStreaming || state?.isStreaming ? 'streaming' : 'idle',
       sessionName: state?.sessionName,
       sessionId: state?.sessionId,

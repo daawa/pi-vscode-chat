@@ -109,6 +109,14 @@ export async function createProvider(historyLoaded = true, editManager?: Instanc
     getMessages: mock(async (): Promise<any[]> => []), isRunning: true,
     start: mock((_path?: string) => {}), stop: mock(async () => {}),
     getModels: mock(async (): Promise<any[]> => []), setModel: mock(async (_provider: string, _modelId: string) => true),
+    abort: mock(async () => {}),
+    clearQueue: mock(async () => ({ steering: [], followUp: [] })),
+    followUp: mock(async (_text: string) => true),
+    getAvailableThinkingLevels: mock(async (): Promise<any[]> => []),
+    setSessionName: mock(async (_name: string) => true),
+    compact: mock(async () => true),
+    exportHtml: mock(async () => null),
+    steer: mock(async () => true), setThinkingLevel: mock(async (_level: string) => true),
   });
   const edits = editManager ?? {
     onDidChange: () => new Disposable(), recordEdit: mock(async (_path: string, _content: string) => ({ diff: 'computed patch' })),

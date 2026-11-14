@@ -651,6 +651,18 @@ pre:hover .code-copy { opacity: 1; }
   white-space: nowrap;
 }
 .queue-chip.steer { border-color: color-mix(in srgb, var(--link) 40%, transparent); }
+.queue-clear {
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 9px;
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.queue-clear:hover { background: var(--hover); color: var(--text); }
 
 /* Status bar */
 #status-bar {
@@ -817,6 +829,8 @@ pre:hover .code-copy { opacity: 1; }
 .icon-button.send { color: var(--link); }
 .icon-button.send:disabled { opacity: 0.35; cursor: default; }
 .icon-button.send:not(:disabled):hover { background: var(--hover); }
+.icon-button.followup { color: var(--text-dim); }
+.icon-button.followup:hover { background: var(--hover); color: var(--link); }
 
 .icon-button.stop {
   border-radius: 4px;

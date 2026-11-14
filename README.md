@@ -59,7 +59,7 @@ code --install-extension iqbalabiyoga.pi-vscode-chat
 - **Interactive Skills Manager** — inspect and manage skills & extensions (`context-mode`, `pi-superpowers`, `pi-subagents`, `pi-agents-team`, `pi-caveman`, `pi-web-access`, `pi-mcp-adapter`) directly via Command Palette (`Pi: Manage Skills & Extensions`).
 - **Visual Diff Badges & Inline View** — real-time `+Added / -Removed` line stats (e.g. `+18 / -3`) on file edits, side-by-side inline diffs, auto-generated unified patch fallbacks, and 1-click Keep / Undo actions.
 - **Streaming chat** — real-time markdown rendering, syntax-highlighted code blocks, copy buttons, collapsible thinking (reasoning) blocks.
-- **Steering** — keep typing while the agent runs. Enter queues a steering message, Esc aborts.
+- **Steering & queued follow-ups** — keep typing while the agent runs. Enter queues a steering message (↪); the ⏭ button in the composer queues a follow-up to run after the current run finishes; Esc aborts and returns any queued drafts to the composer.
 - **Slash commands** — `/` autocompletes every pi command, skill, prompt template on your machine (rtk, caveman, team-init, etc.).
 - **`@` file search** — inline fuzzy file search: `@` + filename to reference workspace files.
 - **Edit tracking** — every agent file edit gets Diff / Keep / Undo. A "Keep all / Undo all" changes bar lets you batch-accept or batch-revert edits from the current session.
@@ -101,7 +101,10 @@ Accepted images are stored in Pi's session history and restored with the convers
 | `Pi: Select Model` | — | Pick model/provider from available options |
 | `Pi: Accept Edit` | — | Keep a pending edit |
 | `Pi: Reject Edit` | — | Revert a pending edit |
-| `Pi: Abort Current Task` | — | Stop the currently running agent |
+| `Pi: Abort Current Task` | — | Stop the currently running agent (queued drafts return to the composer) |
+| `Pi: Compact Conversation` | — | Manually compact context, with optional instructions |
+| `Pi: Rename Session` | — | Set a display name for the current session |
+| `Pi: Export Session as HTML` | — | Export the current session to an HTML file |
 | `Pi Chat: Ask About Selection` | Editor context menu | Send selected code to chat with file path and line numbers |
 
 ---

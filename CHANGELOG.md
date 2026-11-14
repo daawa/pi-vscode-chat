@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- Align the RPC layer with the current pi protocol: `thinking_end` now reads the authoritative `content` field (previously the stale `thinking` name), `agent_end` respects `willRetry`, and the new `agent_settled` event is the definitive idle marker, so automatic retries, overflow recovery, compaction, steering, and follow-up work no longer settle the UI mid-run.
+- Handle the new session events `thinking_level_changed`, `session_info_changed`, `entry_appended`, `summarization_retry_scheduled`/`finished`, and `compaction_end.errorMessage`; unknown events remain ignored.
+- Respect `data.disposition` on `prompt` responses: a prompt consumed by an extension or input handler (`"handled"`) no longer leaves the UI waiting for a run that never starts.
+- Expose the full current command surface in the client: `follow_up`, `clear_queue`, `get_available_thinking_levels`, `set_session_name`, `compact`, and `export_html` (typed methods added; `RpcCommand` covers every stdin command).
+- Queue follow-ups: a ⏭ button in the composer queues the draft to run after the current run; Esc/abort first clears the pi queue and restores the queued drafts into the composer, and the queue bar gains a ✕ clear button.
+- Cycle thinking levels only among the levels the current model actually supports (`get_available_thinking_levels`, refetched on model change).
+- New commands: `Pi: Compact Conversation`, `Pi: Rename Session`, `Pi: Export Session as HTML`.
+- Update RPC type contracts: `get_commands` uses `sourceInfo`, `get_state` carries steering/follow-up modes, message counts, and auto-compaction flag; `message_update` gains cumulative `usage`.
+
 ## 0.3.0 (2026-11-03)
 
 - Show the extension version (`v0.3.0`-style) in the sidebar footer, read from the extension's `package.json` at activation.

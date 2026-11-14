@@ -17,8 +17,9 @@ export type ImageAttachment = PromptImage & { id: string; type: 'image'; name: s
 export type Attachment = FileAttachment | ImageAttachment;
 
 export type WebviewMessage =
-  | { type: 'prompt'; text: string; images?: PromptImage[]; streaming?: boolean; submissionId?: string }
+  | { type: 'prompt'; text: string; images?: PromptImage[]; streaming?: boolean; behavior?: 'steer' | 'followUp'; submissionId?: string }
   | { type: 'abort' }
+  | { type: 'clearQueue' }
   | { type: 'revertEdit'; editId: string }
   | { type: 'acceptEdit'; editId: string }
   | { type: 'revertAllEdits' }
@@ -41,7 +42,7 @@ export type WebviewMessage =
   | { type: 'extensionUiResponse'; id: string; value?: string; confirmed?: boolean; cancelled?: boolean };
 
 export type WebviewOutMessage =
-  | { type: 'init'; model: string; modelReasoning: boolean; modelSupportsImages: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
+  | { type: 'init'; model: string; modelReasoning: boolean; modelSupportsImages: boolean; thinkingLevel: string; thinkingLevels?: string[]; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
   | { type: 'commands'; commands: PiCommandInfo[] }
   | { type: 'styleSelected'; style: ChatStyle }
   | { type: 'stats'; stats: SessionStats | null }

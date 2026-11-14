@@ -231,6 +231,12 @@ export function createPanels({ vscode, isLocked }) {
     (followUp || []).forEach(t => {
       queueBar.appendChild(createElement('span', 'queue-chip follow', `⏭ ${escapeHtml(t.slice(0, 60))}`));
     });
+    const clearBtn = createElement('button', 'queue-clear', '✕');
+    clearBtn.type = 'button';
+    clearBtn.title = 'Clear queued messages';
+    clearBtn.setAttribute('aria-label', 'Clear queued messages');
+    clearBtn.addEventListener('click', () => vscode.postMessage({ type: 'clearQueue' }));
+    queueBar.appendChild(clearBtn);
   }
 
   // ── Stats footer ──

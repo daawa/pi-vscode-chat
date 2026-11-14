@@ -55,6 +55,17 @@ export class EventBridge implements vscode.Disposable {
         break;
 
       case 'agent_end':
+        // agent_end closes one low-level run; an automatic retry (willRetry) or
+        // queued steering/follow-up can still start another run. agent_settled is
+        // the authoritative "no more automatic work" marker.
+        if (event.willRetry) break;
+        this.session.setStreaming(false);
+        this.postMessage({ type: 'agentEnd' });
+        void this.session.sendStats();
+        break;
+
+      case 'agent_settled':
+        // Definitive idle: retries, compaction recovery, and queued input are done.
         this.session.setStreaming(false);
         this.postMessage({ type: 'agentEnd' });
         void this.session.sendStats();
@@ -101,12 +112,41 @@ export class EventBridge implements vscode.Disposable {
         }
         break;
 
+      case 'summarization_retry_scheduled':
+        this.postMessage({
+          type: 'retryStatus',
+          text: `Summarization failed — retrying (${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s…`,
+        });
+        break;
+
+      case 'summarization_retry_finished':
+        this.postMessage({ type: 'retryStatus', text: null });
+        break;
+
       case 'compaction_start':
         this.postMessage({ type: 'compactionStatus', text: 'Compacting conversation context…' });
         break;
 
       case 'compaction_end':
         this.postMessage({ type: 'compactionStatus', text: null });
+        if (!event.aborted && event.errorMessage) {
+          this.postMessage({ type: 'error', message: `Compaction failed: ${event.errorMessage}` });
+        }
+        void this.session.sendStats();
+        break;
+
+      case 'thinking_level_changed':
+        // The active thinking level changed outside this UI (pi command, extension).
+        void this.session.sendState();
+        break;
+
+      case 'session_info_changed':
+        // The session display name changed; refresh the header.
+        void this.session.sendState();
+        break;
+
+      case 'entry_appended':
+        // An extension appended a custom session entry; refresh derived stats.
         void this.session.sendStats();
         break;
 
@@ -137,11 +177,12 @@ export class EventBridge implements vscode.Disposable {
         });
         break;
       case 'thinking_end':
+        // Current pi names the authoritative field "content"; older pi sent "thinking".
         this.postMessage({
           type: 'thinkingEnd',
           messageId: 'current',
           blockIndex: msgEvent.contentIndex ?? 0,
-          content: msgEvent.thinking,
+          content: msgEvent.content ?? msgEvent.thinking,
         });
         break;
     }

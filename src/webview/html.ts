@@ -85,6 +85,9 @@ export function getHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
               <button id="btn-thinking" class="pill hidden" title="Thinking level"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a5 5 0 0 0-3 9v2.5A1.5 1.5 0 0 0 6.5 14h3a1.5 1.5 0 0 0 1.5-1.5V10a5 5 0 0 0-3-9zM6.5 15.3h3v.2a.5.5 0 0 1-.5.5H7a.5.5 0 0 1-.5-.5v-.2z"/></svg><span id="thinking-level">off</span></button>
             </div>
             <div class="right-actions">
+              <button id="btn-followup" class="icon-button followup hidden" title="Queue after current run" aria-label="Queue after current run">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2.75A.75.75 0 0 1 3.75 2h5a.75.75 0 0 1 0 1.5H5.56l6.22 6.22a.75.75 0 0 1-1.06 1.06L4.5 4.56v3.19a.75.75 0 0 1-1.5 0v-5z"/><path d="M11 12.5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75z"/></svg>
+              </button>
               <button id="btn-send" class="icon-button send" title="Send (Enter)" disabled aria-label="Send">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.72 1.05a.5.5 0 0 0-.71.55l1.4 4.85a.5.5 0 0 0 .4.35l5.69.96c.26.05.26.43 0 .48l-5.69.96a.5.5 0 0 0-.4.35l-1.4 4.85a.5.5 0 0 0 .71.55l13.32-6.69a.5.5 0 0 0 0-.9L1.72 1.05z"/></svg>
               </button>

@@ -65,17 +65,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
   newSession(): Promise<void> { return this.session.newSession(); }
   selectModel(notify = false): Promise<void> { return this.models.selectModel(notify); }
 
+  /** Interactive abort: pi continues queued messages after abort, so clear the queue
+   * first and restore the drafts in the composer (rpc-commands.md, clear_queue). */
+  async abort(): Promise<void> {
+    const queue = await this.pi.clearQueue().catch(() => null);
+    const drafts = [...(queue?.steering || []), ...(queue?.followUp || [])];
+    if (drafts.length) this.postMessage({ type: 'setInputText', text: drafts.join('\n\n'), append: true });
+    await this.pi.abort();
+  }
+
   /** Shared typed entry point for UI commands; all asynchronous failures are observed. */
   async handleMessage(message: WebviewMessage): Promise<void> {
     if (this.disposed) return;
     try {
       switch (message.type) {
         case 'prompt':
-          await this.session.submit(message.text, message.images, message.streaming, message.submissionId);
+          await this.session.submit(message.text, message.images, message.streaming, message.submissionId, message.behavior);
           break;
         case 'runCommand': await this.session.runCommand(message.command); break;
         case 'ready': await this.session.ready(); break;
-        case 'abort': await this.pi.abort(); break;
+        case 'abort': await this.abort(); break;
+        case 'clearQueue': await this.pi.clearQueue(); break;
         case 'newSession': await this.newSession(); break;
         case 'resumeSession': await this.session.resumeSession(message.filePath); break;
         case 'getSessions': this.postMessage({ type: 'sessionsList', sessions: await this.repository.list() }); break;

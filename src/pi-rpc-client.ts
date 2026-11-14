@@ -80,6 +80,46 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
 
   async abort(): Promise<void> { await this.send({ type: 'abort' }); }
 
+  /** Queue a message to run after the current run finishes (disposition "queued" or "handled"). */
+  async followUp(text: string, images?: PromptImage[]): Promise<boolean> {
+    const response = await this.send({ type: 'follow_up', message: text,
+      ...(images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {}),
+    });
+    return response.success;
+  }
+
+  /** Remove queued steering/follow-up messages and return their text. */
+  async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    const data = responseData(await this.send({ type: 'clear_queue' }));
+    return { steering: stringList(data?.steering), followUp: stringList(data?.followUp) };
+  }
+
+  /** Thinking levels supported by the current model; ["off"] for non-reasoning models. */
+  async getAvailableThinkingLevels(): Promise<ThinkingLevel[]> {
+    const data = responseData(await this.send({ type: 'get_available_thinking_levels' }));
+    const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+    return Array.isArray(data?.levels)
+      ? data.levels.filter((level): level is ThinkingLevel => (levels as readonly string[]).includes(level))
+      : [];
+  }
+
+  /** Set a display name for the current session. */
+  async setSessionName(name: string): Promise<boolean> {
+    return (await this.send({ type: 'set_session_name', name })).success;
+  }
+
+  /** Manually compact conversation context. False when compaction failed or was aborted. */
+  async compact(customInstructions?: string): Promise<boolean> {
+    return (await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) })).success;
+  }
+
+  /** Export the session as HTML; returns the written path. */
+  async exportHtml(outputPath?: string): Promise<string | null> {
+    const data = responseData(await this.send({ type: 'export_html', ...(outputPath ? { outputPath } : {}) }));
+    return typeof data?.path === 'string' ? data.path : null;
+  }
+
+
   async getModels(): Promise<ModelInfo[]> {
     const data = responseData(await this.send({ type: 'get_available_models' }));
     return Array.isArray(data?.models) ? data.models.filter(isModelInfo) : [];
@@ -150,4 +190,7 @@ function sessionChangeResult(response: RpcResponse): SessionChangeResult {
 function isModelInfo(value: unknown): value is ModelInfo {
   return isRecord(value) && typeof value.id === 'string' && typeof value.provider === 'string'
     && Array.isArray(value.input) && value.input.every(input => input === 'text' || input === 'image');
+}
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }

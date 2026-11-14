@@ -123,6 +123,46 @@
     assert(document.getElementById('sessions-panel').classList.contains('hidden'), 'Session picker did not close');
   });
 
+  test('thinking cycles within the levels the current model supports', () => {
+    send({ type: 'init', state: 'idle', model: 'provider/model', modelReasoning: true, thinkingLevel: 'low', thinkingLevels: ['off', 'low', 'high'] });
+    document.getElementById('btn-thinking').click();
+    assert(testPostedMessages.at(-1).level === 'high', 'Thinking did not cycle within supported levels');
+    document.getElementById('btn-thinking').click();
+    assert(testPostedMessages.at(-1).level === 'off', 'Thinking did not wrap around the supported list');
+    send({ type: 'init', state: 'idle', model: 'other/model', modelReasoning: true, thinkingLevel: 'minimal' });
+    document.getElementById('btn-thinking').click();
+    assert(testPostedMessages.at(-1).level === 'low', 'Thinking did not fall back to the default list when levels are absent');
+  });
+
+  test('follow-up button is streaming-only and queues the draft after the current run', () => {
+    const followupBtn = document.getElementById('btn-followup');
+    type('then summarize');
+    assert(followupBtn.classList.contains('hidden'), 'Follow-up button visible while idle');
+    send({ type: 'init', state: 'streaming', model: 'provider/model' });
+    assert(!followupBtn.classList.contains('hidden'), 'Follow-up button hidden while streaming with a draft');
+    followupBtn.click();
+    const prompt = testPostedMessages.at(-1);
+    assert(prompt.type === 'prompt' && prompt.behavior === 'followUp' && prompt.streaming === true, 'Follow-up draft not queued');
+    send({ type: 'sessionCleared' });
+    send({ type: 'init', state: 'streaming', model: 'provider/model' });
+    assert(followupBtn.classList.contains('hidden'), 'Follow-up button visible without a draft');
+    // Enter still steers by default while streaming.
+    type('change direction');
+    key('Enter');
+    const steer = testPostedMessages.at(-1);
+    assert(steer.type === 'prompt' && steer.streaming === true && steer.behavior === undefined, 'Enter stopped steering by default');
+  });
+
+  test('queue bar clear button routes to the host and hides with an empty queue', () => {
+    send({ type: 'queueUpdate', steering: ['First'], followUp: ['Later'] });
+    const clearBtn = document.querySelector('.queue-clear');
+    assert(clearBtn, 'Queue clear button missing');
+    clearBtn.click();
+    assert(testPostedMessages.at(-1).type === 'clearQueue', 'Clear queue not routed');
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide when emptied');
+  });
+
   test('plain file references flow from attachment controller into the submitted prompt', () => {
     document.getElementById('btn-attach').click();
     const requestId = testPostedMessages.at(-1).requestId;

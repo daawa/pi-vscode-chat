@@ -23,7 +23,33 @@ export function registerCommands(
     command('piChat.selectModel', () => sidebar.selectModel(true)),
     command('piChat.acceptEdit', id => { if (typeof id === 'string') edits.acceptEdit(id); }),
     command('piChat.rejectEdit', id => { if (typeof id === 'string') return edits.revertEdit(id); }),
-    command('piChat.abort', () => pi.abort()),
+    command('piChat.abort', () => sidebar.abort()),
+    command('piChat.compact', async () => {
+      const instructions = await vscode.window.showInputBox({
+        prompt: 'Optional compaction instructions (empty for default)',
+        placeHolder: 'e.g. Focus on code changes',
+      });
+      if (instructions === undefined) return; // cancelled
+      if (!await pi.compact(instructions.trim() || undefined)) throw new Error('Compaction failed or was aborted');
+      void vscode.window.showInformationMessage('Pi Chat: conversation compacted.');
+    }),
+    command('piChat.renameSession', async () => {
+      const state = await pi.getState().catch(() => null);
+      const name = await vscode.window.showInputBox({
+        prompt: 'Display name for the current session',
+        value: state?.sessionName || '',
+      });
+      if (name === undefined) return; // cancelled
+      if (!await pi.setSessionName(name.trim())) throw new Error('Failed to rename session');
+      await sidebar.session.sendState();
+    }),
+    command('piChat.exportHtml', async () => {
+      const path = await pi.exportHtml();
+      if (!path) throw new Error('Failed to export session');
+      const open = 'Open file';
+      const choice = await vscode.window.showInformationMessage(`Pi Chat: session exported to ${path}`, open);
+      if (choice === open) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path));
+    }),
     vscode.commands.registerTextEditorCommand('piChat.sendSelection', editor => {
       const selection = editor.selection;
       const text = editor.document.getText(selection);
