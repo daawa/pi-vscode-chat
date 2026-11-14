@@ -81,6 +81,10 @@ export function createConversation({ vscode, state, saveState }) {
     const content = createElement('div', 'message-content');
     content.textContent = text;
     if (submissionId) msg.dataset.submissionId = submissionId;
+    if (queued) {
+      // Raw text key used to reconcile bubbles with the pi queue (queue_update/queueCleared).
+      msg.dataset.queuedText = text;
+    }
     if (images.length) {
       const gallery = createElement('div', 'message-images');
       images.forEach(image => {
@@ -194,8 +198,33 @@ export function createConversation({ vscode, state, saveState }) {
     });
   }
 
+  // ── Queue reconciliation (pi queue_update / queueCleared) ──
+
+  /** A queued bubble whose text is no longer in the pi queue was consumed by a run:
+   *  settle it into a normal sent message instead of leaving it dashed forever. */
+  function settleQueuedMessages(steering = [], followUp = []) {
+    const pending = new Set([...steering, ...followUp]);
+    document.querySelectorAll('.message.user.queued').forEach(el => {
+      if (el.dataset.queuedText === undefined || pending.has(el.dataset.queuedText)) return;
+      el.classList.remove('queued');
+      delete el.dataset.queuedText;
+      const tag = el.querySelector('.queued-tag');
+      if (tag) tag.remove();
+      saveState();
+    });
+  }
+
+  /** Remove the bubbles for messages dropped by clear_queue; their text returns to the composer. */
+  function removeQueuedMessages(steering = [], followUp = []) {
+    const dropped = new Set([...steering, ...followUp]);
+    document.querySelectorAll('.message.user.queued').forEach(el => {
+      if (dropped.has(el.dataset.queuedText)) el.remove();
+    });
+    saveState();
+  }
+
   const tools = createToolCards({ vscode, state, getOrCreateMessage, scrollToBottom, saveState });
   const { renderHistory } = createHistoryRenderer({ messagesEl, state, addUserMessage, renderWelcome, scrollToBottom, saveState });
 
-  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, clear, removeRejectedMessage, enableAutoScroll: () => { autoScroll = true; } };
+  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, clear, removeRejectedMessage, settleQueuedMessages, removeQueuedMessages, enableAutoScroll: () => { autoScroll = true; } };
 }

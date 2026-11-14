@@ -114,6 +114,16 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     inputEl.focus();
   }
 
+  /** An extension/input handler consumed the prompt (disposition "handled"): drop the
+   *  optimistic bubble, keep the draft for re-editing, and stay silent about it. */
+  function handlePromptHandled(msg) {
+    if (pendingSubmission !== msg.submissionId) return;
+    pendingSubmission = null;
+    removeRejectedMessage(msg.submissionId);
+    updateComposerState();
+    inputEl.focus();
+  }
+
   function setInputText(text, append) {
     if (pendingSubmission) return;
     inputEl.value = append && inputEl.value ? inputEl.value + '\n' + text : text;
@@ -158,5 +168,5 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
   btnAttach.addEventListener('click', attachments.selectFiles);
   bindDropInput({ inputEl, attachments, isLocked });
 
-  return { attachments, autocomplete, isLocked, updateStreamingState, clear: clearComposer, setInputText, setModelSupportsImages, setHistoryLoading, handlePromptResult };
+  return { attachments, autocomplete, isLocked, updateStreamingState, clear: clearComposer, setInputText, setModelSupportsImages, setHistoryLoading, handlePromptResult, handlePromptHandled };
 }

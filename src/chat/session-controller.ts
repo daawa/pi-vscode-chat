@@ -147,24 +147,39 @@ export class SessionController implements vscode.Disposable {
         }
       }
       if (this.disposed) return;
+      // The webview's streaming flag can be stale; the controller's event-driven
+      // view is authoritative. An explicit followUp request keeps its behavior
+      // even if the flags disagree, so the draft is never silently downgraded.
+      const streamingNow = streaming || this.isStreaming;
+      const wantsFollowUp = behavior === 'followUp' && (!isCommand || !!images?.length);
       // Echo before streamed output, but remove this bubble if Pi rejects preflight.
-      this.postMessage({ type: 'userMessage', text, images, queued: !!streaming && !isCommand, submissionId });
-      if (!streaming && !isCommand) {
+      this.postMessage({ type: 'userMessage', text, images, queued: (!!streaming || wantsFollowUp) && !isCommand, submissionId });
+      if (!streamingNow && !isCommand) {
         started = true;
         this.setStreaming(true);
         await this.edits.snapshotWorkspace();
       }
       if (this.disposed) return;
-      const result = await this.pi.prompt(text, images, streaming && (!isCommand || !!images?.length) ? behavior : undefined);
+      const result = await this.pi.prompt(
+        text, images,
+        wantsFollowUp ? 'followUp' : streamingNow && (!isCommand || !!images?.length) ? 'steer' : undefined,
+      );
       if (this.disposed) return;
       if (!result.success) throw new Error(result.error || 'Failed to send prompt to pi');
-      if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true });
-      // "handled" means an extension or input handler consumed the prompt: no agent
-      // run starts, so no agent_end/agent_settled will ever arrive for it.
-      if (responseDisposition(result) === 'handled' && started) {
-        started = false;
-        this.setStreaming(false);
-        this.postMessage({ type: 'agentEnd' });
+      const disposition = responseDisposition(result);
+      if (disposition === 'handled' && (streaming || wantsFollowUp) && !isCommand && submissionId) {
+        // An extension/input handler consumed the prompt: no run, no queue entry.
+        // Drop the optimistic queued bubble and keep the draft for re-editing.
+        this.postMessage({ type: 'promptHandled', submissionId });
+      } else {
+        if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true });
+        // "handled" for an idle prompt: no agent run starts, so no agent_end or
+        // agent_settled will ever arrive for it.
+        if (disposition === 'handled' && started) {
+          started = false;
+          this.setStreaming(false);
+          this.postMessage({ type: 'agentEnd' });
+        }
       }
       if (isCommand) await this.sendState();
     } catch (err) {
@@ -193,19 +208,32 @@ export class SessionController implements vscode.Disposable {
       void Promise.resolve(this.workspaceState.update(LAST_SESSION_FILE_STATE_KEY, state.sessionFile)).catch(console.warn);
     }
     // Thinking levels are model-scoped; refetch only when the model changes.
+    // The cache key is committed only after a completed fetch, so a failed or
+    // superseded request is retried on the next refresh instead of being lost.
     const modelKey = state?.model ? `${state.model.provider}/${state.model.id}` : null;
     if (modelKey !== this.thinkingLevelsModel) {
-      this.thinkingLevelsModel = modelKey;
-      this.thinkingLevels = modelKey ? await this.pi.getAvailableThinkingLevels().catch(() => null) : null;
+      let levels: string[] | null = null;
+      let failed = false;
+      if (modelKey) {
+        try { levels = await this.pi.getAvailableThinkingLevels(); }
+        catch { failed = true; }
+      }
       if (this.disposed || requestId !== this.stateRequestId) return;
+      if (!failed) {
+        this.thinkingLevelsModel = modelKey;
+        this.thinkingLevels = levels;
+      }
     }
+    // Only send levels proven to belong to the current model; otherwise the
+    // webview falls back to its default list.
+    const currentLevels = this.thinkingLevelsModel === modelKey ? this.thinkingLevels : null;
     this.postMessage({
       type: 'init',
       model: state?.model ? `${state.model.provider}/${state.model.id}` : 'unknown',
       modelReasoning: !!state?.model?.reasoning,
       modelSupportsImages: !!state?.model?.input?.includes('image'),
       thinkingLevel: state?.thinkingLevel || 'off',
-      ...(this.thinkingLevels?.length ? { thinkingLevels: this.thinkingLevels } : {}),
+      ...(currentLevels?.length ? { thinkingLevels: currentLevels } : {}),
       state: this.isStreaming || state?.isStreaming ? 'streaming' : 'idle',
       sessionName: state?.sessionName,
       sessionId: state?.sessionId,

@@ -30,7 +30,12 @@ export function registerCommands(
         placeHolder: 'e.g. Focus on code changes',
       });
       if (instructions === undefined) return; // cancelled
-      if (!await pi.compact(instructions.trim() || undefined)) throw new Error('Compaction failed or was aborted');
+      // Progress streams via compaction_start/end events (status chip); a failed or
+      // user-aborted compaction is a warning, not an extension error.
+      if (!await pi.compact(instructions.trim() || undefined)) {
+        void vscode.window.showWarningMessage('Pi Chat: compaction did not complete (aborted or failed).');
+        return;
+      }
       void vscode.window.showInformationMessage('Pi Chat: conversation compacted.');
     }),
     command('piChat.renameSession', async () => {

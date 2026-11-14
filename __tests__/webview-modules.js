@@ -163,6 +163,33 @@
     assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide when emptied');
   });
 
+  test('queued bubbles settle when consumed and are removed when the queue is cleared', () => {
+    send({ type: 'userMessage', text: 'steer it', queued: true, submissionId: 'q1' });
+    send({ type: 'userMessage', text: 'later', queued: true, submissionId: 'q2' });
+    const queued = () => document.querySelectorAll('.message.user.queued');
+    assert(queued().length === 2, 'Queued bubbles missing');
+    send({ type: 'queueUpdate', steering: ['steer it'], followUp: ['later'] });
+    assert(queued().length === 2, 'Still-pending bubbles settled early');
+    send({ type: 'queueUpdate', steering: [], followUp: ['later'] });
+    const consumed = document.querySelector('[data-submission-id="q1"]');
+    assert(consumed && !consumed.classList.contains('queued') && !consumed.querySelector('.queued-tag'), 'Consumed steer bubble not settled');
+    send({ type: 'queueCleared', steering: [], followUp: ['later'] });
+    assert(!document.querySelector('[data-submission-id="q2"]'), 'Cleared follow-up bubble survived');
+    assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide after clear');
+  });
+
+  test('a handled prompt drops its optimistic bubble and keeps the draft editable', () => {
+    type('steer this');
+    button.click();
+    const prompt = testPostedMessages.at(-1);
+    assert(prompt.type === 'prompt', 'Prompt not sent');
+    send({ type: 'userMessage', text: 'steer this', queued: true, submissionId: prompt.submissionId });
+    send({ type: 'promptHandled', submissionId: prompt.submissionId });
+    assert(!document.querySelector('.message.user.queued'), 'Handled bubble survived');
+    assert(input.value === 'steer this', 'Draft lost after handled prompt');
+    assert(!button.disabled, 'Composer stayed locked after handled prompt');
+  });
+
   test('plain file references flow from attachment controller into the submitted prompt', () => {
     document.getElementById('btn-attach').click();
     const requestId = testPostedMessages.at(-1).requestId;

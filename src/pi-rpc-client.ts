@@ -3,7 +3,7 @@ import { RpcTransport, type TransportOptions } from './rpc/transport.ts';
 import { isRecord } from './value-guards.ts';
 import type {
   RpcCommand, RpcResponse, RpcEvent, PiCommandInfo, SessionStats, RpcState,
-  ModelInfo, AgentMessage, SessionChangeResult, ThinkingLevel,
+  ModelInfo, AgentMessage, SessionChangeResult, ThinkingLevel, RpcImage,
 } from './rpc-types.ts';
 import type { PromptImage } from './webview-types.ts';
 
@@ -44,14 +44,14 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
     this.launchArgs = undefined;
     await this.transport.stop();
   }
-  async send(command: RpcCommand): Promise<RpcResponse> {
+  async send(command: RpcCommand, timeoutMs?: number): Promise<RpcResponse> {
     // A child that exited or was never started is replaced with its last launch
     // arguments, so a rebuilt pi binary is picked up without a window reload.
     if (!this.transport.isRunning) {
       if (!this.launchArgs) throw new Error('pi not running');
       this.transport.start(this.launchArgs);
     }
-    return this.transport.request(command);
+    return this.transport.request(command, timeoutMs);
   }
 
   dispose(): void {
@@ -65,28 +65,17 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
 
   prompt(text: string, images?: PromptImage[], streamingBehavior?: 'steer' | 'followUp'): Promise<RpcResponse> {
     return this.send({
-      type: 'prompt', message: text,
-      ...(images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {}),
+      type: 'prompt', message: text, ...rpcImages(images),
       ...(streamingBehavior ? { streamingBehavior } : {}),
     });
   }
 
   async steer(text: string, images?: PromptImage[]): Promise<boolean> {
-    const response = await this.send({ type: 'steer', message: text,
-      ...(images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {}),
-    });
+    const response = await this.send({ type: 'steer', message: text, ...rpcImages(images) });
     return response.success;
   }
 
   async abort(): Promise<void> { await this.send({ type: 'abort' }); }
-
-  /** Queue a message to run after the current run finishes (disposition "queued" or "handled"). */
-  async followUp(text: string, images?: PromptImage[]): Promise<boolean> {
-    const response = await this.send({ type: 'follow_up', message: text,
-      ...(images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {}),
-    });
-    return response.success;
-  }
 
   /** Remove queued steering/follow-up messages and return their text. */
   async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
@@ -108,9 +97,11 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
     return (await this.send({ type: 'set_session_name', name })).success;
   }
 
-  /** Manually compact conversation context. False when compaction failed or was aborted. */
+  /** Manually compact conversation context. False when compaction failed or was aborted.
+   * Compaction summarizes the whole context with an LLM call, so it gets a longer timeout
+   * than regular commands; progress streams via compaction_start/end events. */
   async compact(customInstructions?: string): Promise<boolean> {
-    return (await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) })).success;
+    return (await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) }, 600_000)).success;
   }
 
   /** Export the session as HTML; returns the written path. */
@@ -193,4 +184,7 @@ function isModelInfo(value: unknown): value is ModelInfo {
 }
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+function rpcImages(images?: PromptImage[]): { images?: RpcImage[] } {
+  return images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {};
 }

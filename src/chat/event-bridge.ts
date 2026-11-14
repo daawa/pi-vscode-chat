@@ -11,6 +11,14 @@ export class EventBridge implements vscode.Disposable {
   private toolCalls = new Map<string, { args: ToolArgs; snapshot?: Promise<unknown> }>();
   private disposed = false;
   private epoch = 0;
+  /** True once pi has emitted agent_settled: current protocol, rely on it exclusively. */
+  private settledSeen = false;
+  /** True while the UI shows an unsettled run; guards against double agentEnd. */
+  private runSettled = true;
+  /** Fallback settle timer for pi builds that never emit agent_settled. */
+  private settleTimer?: ReturnType<typeof setTimeout>;
+  /** Coalesces bursty state-refresh events into one RPC round trip. */
+  private refreshTimer?: ReturnType<typeof setTimeout>;
   private readonly editSubscription: vscode.Disposable;
   private readonly onEvent = (event: RpcEvent) => { void this.handle(event).catch(this.onError); };
   private readonly onError = (error: unknown) => {
@@ -35,10 +43,16 @@ export class EventBridge implements vscode.Disposable {
     this.editSubscription = edits.onDidChange(record => this.onEditChanged(record));
   }
 
-  reset(): void { this.epoch++; this.toolCalls.clear(); }
+  reset(): void {
+    this.epoch++;
+    this.toolCalls.clear();
+    this.clearSettleTimer();
+    this.runSettled = true;
+  }
   dispose(): void {
     this.disposed = true;
     this.reset();
+    this.clearRefreshTimer();
     this.pi.off('event', this.onEvent);
     this.pi.off('exit', this.onExit);
     this.pi.off('transportError', this.onError);
@@ -49,26 +63,26 @@ export class EventBridge implements vscode.Disposable {
     if (this.disposed) return;
     switch (event.type) {
       case 'agent_start':
+        this.clearSettleTimer();
+        this.runSettled = false;
         this.session.setStreaming(true);
         this.postMessage({ type: 'agentStart' });
         this.edits.snapshotWorkspace().catch(() => {});
         break;
 
       case 'agent_end':
-        // agent_end closes one low-level run; an automatic retry (willRetry) or
-        // queued steering/follow-up can still start another run. agent_settled is
-        // the authoritative "no more automatic work" marker.
-        if (event.willRetry) break;
-        this.session.setStreaming(false);
-        this.postMessage({ type: 'agentEnd' });
-        void this.session.sendStats();
+        // agent_end closes one low-level run, but retries, overflow recovery,
+        // compaction, or queued steering/follow-up can start another. Once pi has
+        // proven it emits agent_settled, that event is the sole idle marker; older
+        // pi builds fall back to a short grace period after the last agent_end.
+        if (event.willRetry || this.settledSeen) break;
+        this.scheduleSettle();
         break;
 
       case 'agent_settled':
-        // Definitive idle: retries, compaction recovery, and queued input are done.
-        this.session.setStreaming(false);
-        this.postMessage({ type: 'agentEnd' });
-        void this.session.sendStats();
+        this.settledSeen = true;
+        this.clearSettleTimer();
+        this.settleRun();
         break;
 
       case 'message_update':
@@ -136,18 +150,10 @@ export class EventBridge implements vscode.Disposable {
         break;
 
       case 'thinking_level_changed':
-        // The active thinking level changed outside this UI (pi command, extension).
-        void this.session.sendState();
-        break;
-
       case 'session_info_changed':
-        // The session display name changed; refresh the header.
-        void this.session.sendState();
-        break;
-
       case 'entry_appended':
-        // An extension appended a custom session entry; refresh derived stats.
-        void this.session.sendStats();
+        // Bursty metadata events coalesce into a single state+stats refresh.
+        this.scheduleRefresh();
         break;
 
       case 'extension_ui_request':
@@ -158,6 +164,46 @@ export class EventBridge implements vscode.Disposable {
         this.postMessage({ type: 'error', message: event.error || 'Extension error' });
         break;
     }
+  }
+
+  private settleRun(): void {
+    if (this.runSettled) return;
+    this.runSettled = true;
+    this.session.setStreaming(false);
+    this.postMessage({ type: 'agentEnd' });
+    void this.session.sendStats();
+  }
+
+  private scheduleSettle(): void {
+    if (this.settleTimer || this.disposed) return;
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = undefined;
+      this.settleRun();
+    }, 250);
+    this.settleTimer.unref?.();
+  }
+
+  private clearSettleTimer(): void {
+    if (!this.settleTimer) return;
+    clearTimeout(this.settleTimer);
+    this.settleTimer = undefined;
+  }
+
+  private scheduleRefresh(): void {
+    if (this.refreshTimer || this.disposed) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      if (this.disposed) return;
+      void this.session.sendState();
+      void this.session.sendStats();
+    }, 100);
+    this.refreshTimer.unref?.();
+  }
+
+  private clearRefreshTimer(): void {
+    if (!this.refreshTimer) return;
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
   }
 
   private handleMessageUpdate(event: MessageUpdateEvent): void {

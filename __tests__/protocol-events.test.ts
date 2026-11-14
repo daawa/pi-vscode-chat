@@ -4,25 +4,53 @@ afterEach(resetHostFixture);
 
 // Covers alignment with the current pi RPC protocol (../pi-mono docs/json.md).
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 describe('run lifecycle events', () => {
-  test('agent_end with willRetry stays streaming; agent_settled is the definitive idle marker', async () => {
+  test('agent_settled settles once; agent_end alone never settles twice', async () => {
     const { pi, messages } = await createProvider();
     pi.emit('event', { type: 'agent_start' });
     expect(messages.some(m => m.type === 'agentStart')).toBe(true);
     messages.length = 0;
 
-    // An automatic retry follows, so this agent_end must not settle the UI.
+    // An automatic retry follows: no settle.
     pi.emit('event', { type: 'agent_end', messages: [], willRetry: true });
     expect(messages.some(m => m.type === 'agentEnd')).toBe(false);
 
-    // A run end without a retry is reported as before.
+    // A run end without a retry does not settle either: pi emits agent_settled
+    // right after, and queued steering/follow-up may still start another run.
     pi.emit('event', { type: 'agent_end', messages: [], willRetry: false });
-    expect(messages.some(m => m.type === 'agentEnd')).toBe(true);
+    expect(messages.some(m => m.type === 'agentEnd')).toBe(false);
+
+    pi.emit('event', { type: 'agent_settled', aborted: false });
+    expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
     messages.length = 0;
 
-    // agent_settled always settles, including after queued steering/follow-up work.
+    // After pi has proven it emits agent_settled, later agent_ends are ignored.
+    pi.emit('event', { type: 'agent_start' });
+    pi.emit('event', { type: 'agent_end', messages: [], willRetry: false });
     pi.emit('event', { type: 'agent_settled', aborted: false });
-    expect(messages.some(m => m.type === 'agentEnd')).toBe(true);
+    expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
+  });
+
+  test('older pi without agent_settled settles via the grace fallback', async () => {
+    const { pi, messages } = await createProvider();
+    pi.emit('event', { type: 'agent_start' });
+    pi.emit('event', { type: 'agent_end', messages: [] });
+    expect(messages.some(m => m.type === 'agentEnd')).toBe(false); // grace pending
+    await sleep(320);
+    expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
+  });
+
+  test('a run started during the grace window cancels the fallback settle', async () => {
+    const { pi, messages } = await createProvider();
+    pi.emit('event', { type: 'agent_start' });
+    pi.emit('event', { type: 'agent_end', messages: [] }); // queued follow-up starts next
+    pi.emit('event', { type: 'agent_start' });
+    await sleep(320);
+    expect(messages.some(m => m.type === 'agentEnd')).toBe(false); // still streaming
+    pi.emit('event', { type: 'agent_settled', aborted: false });
+    expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
   });
 
   test('thinking_end authoritative content uses the current wire field', async () => {
@@ -37,15 +65,18 @@ describe('run lifecycle events', () => {
     expect(messages.find(m => m.type === 'thinkingEnd')).toMatchObject({ blockIndex: 0, content: 'legacy thought' });
   });
 
-  test('state-changing events trigger a UI refresh', async () => {
+  test('bursty metadata events coalesce into a single refresh', async () => {
     const { pi, provider } = await createProvider();
     const states: unknown[] = [];
     provider.session.sendState = async () => { states.push('state'); };
     pi.emit('event', { type: 'thinking_level_changed', level: 'high' });
     pi.emit('event', { type: 'session_info_changed', name: 'renamed' });
+    pi.emit('event', { type: 'entry_appended', entry: { type: 'note' } });
     await Promise.resolve();
     await Promise.resolve();
-    expect(states).toHaveLength(2);
+    expect(states).toHaveLength(0); // debounced, not one round trip per event
+    await sleep(150);
+    expect(states).toHaveLength(1);
   });
 });
 
@@ -56,26 +87,52 @@ describe('queue and abort semantics', () => {
     await provider.handleMessage({ type: 'abort' });
     expect(pi.clearQueue).toHaveBeenCalledTimes(1);
     expect(pi.abort).toHaveBeenCalledTimes(1);
-    const draft = messages.find(m => m.type === 'setInputText');
-    expect(draft).toMatchObject({ text: 'change direction\n\nthen summarize', append: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    const cleared = messages.find(m => m.type === 'queueCleared');
+    expect(cleared).toMatchObject({ steering: ['change direction'], followUp: ['then summarize'] });
+    expect(messages.find(m => m.type === 'setInputText')).toMatchObject({ text: 'change direction\n\nthen summarize', append: true });
+  });
+
+  test('abort is not blocked by a slow clear_queue response', async () => {
+    const { pi, provider } = await createProvider();
+    pi.clearQueue.mockImplementationOnce(() => new Promise(() => {})); // never resolves
+    await provider.handleMessage({ type: 'abort' });
+    expect(pi.abort).toHaveBeenCalledTimes(1); // abort already sent
   });
 
   test('abort with an empty queue does not touch the composer draft', async () => {
     const { pi, provider, messages } = await createProvider();
     await provider.handleMessage({ type: 'abort' });
     expect(pi.abort).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(messages.some(m => m.type === 'setInputText')).toBe(false);
   });
 
-  test('clearQueue message forwards to pi', async () => {
-    const { pi, provider } = await createProvider();
+  test('queue bar clear restores drafts instead of dropping them', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.clearQueue.mockResolvedValueOnce({ steering: [], followUp: ['later'] });
     await provider.handleMessage({ type: 'clearQueue' });
-    expect(pi.clearQueue).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(messages.find(m => m.type === 'queueCleared')).toMatchObject({ steering: [], followUp: ['later'] });
+    expect(messages.find(m => m.type === 'setInputText')).toMatchObject({ text: 'later', append: true });
   });
 
-  test('prompt with followUp behavior is forwarded through submit', async () => {
+  test('a steer consumed by an input handler drops its queued bubble and keeps the draft', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.prompt.mockResolvedValueOnce({ success: true, data: { disposition: 'handled' } });
+    await provider.handleMessage({ type: 'prompt', text: 'steer this', streaming: true, submissionId: 'sub-1' });
+    expect(messages.some(m => m.type === 'promptHandled' && m.submissionId === 'sub-1')).toBe(true);
+    expect(messages.some(m => m.type === 'promptResult')).toBe(false);
+    expect(messages.some(m => m.type === 'agentEnd')).toBe(false); // nothing to settle
+  });
+
+  test('followUp behavior survives a stale webview streaming flag', async () => {
     const { pi, provider } = await createProvider();
-    await provider.handleMessage({ type: 'prompt', text: 'then summarize', streaming: true, behavior: 'followUp' });
+    await provider.session.setStreaming(true); // host truth: a run is active
+    await provider.handleMessage({ type: 'prompt', text: 'then summarize', streaming: false, behavior: 'followUp' });
     expect(pi.prompt).toHaveBeenCalledWith('then summarize', undefined, 'followUp');
   });
 });
@@ -98,5 +155,19 @@ describe('thinking levels from the server', () => {
     pi.getState.mockResolvedValue({ model: { provider: 'openai', id: 'gpt-5', input: ['text'] }, isStreaming: false, thinkingLevel: 'off', sessionId: 's1' });
     await provider.session.sendState();
     expect(pi.getAvailableThinkingLevels).toHaveBeenCalledTimes(2);
+  });
+
+  test('a failed levels fetch is retried on the next refresh', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.getState.mockResolvedValue({ model: { provider: 'anthropic', id: 'claude-opus-4', input: ['text'], reasoning: true }, isStreaming: false, thinkingLevel: 'medium', sessionId: 's1' });
+    pi.getAvailableThinkingLevels.mockRejectedValueOnce(new Error('busy'));
+    await provider.session.sendState();
+    expect(pi.getAvailableThinkingLevels).toHaveBeenCalledTimes(1);
+    expect(messages.find(m => m.type === 'init')?.thinkingLevels).toBeUndefined(); // webview falls back
+
+    pi.getAvailableThinkingLevels.mockResolvedValueOnce(['off', 'high']);
+    await provider.session.sendState();
+    expect(pi.getAvailableThinkingLevels).toHaveBeenCalledTimes(2); // retried, not lost
+    expect(messages.filter(m => m.type === 'init').at(-1)).toMatchObject({ thinkingLevels: ['off', 'high'] });
   });
 });

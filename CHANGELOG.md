@@ -2,12 +2,13 @@
 
 ## 0.3.1 (unreleased)
 
-- Align the RPC layer with the current pi protocol: `thinking_end` now reads the authoritative `content` field (previously the stale `thinking` name), `agent_end` respects `willRetry`, and the new `agent_settled` event is the definitive idle marker, so automatic retries, overflow recovery, compaction, steering, and follow-up work no longer settle the UI mid-run.
+- Align the RPC layer with the current pi protocol: `thinking_end` now reads the authoritative `content` field (previously the stale `thinking` name), and the new `agent_settled` event is the definitive idle marker (with a grace fallback for older pi builds that never emit it), so automatic retries, overflow recovery, compaction, steering, and follow-up work no longer settle the UI mid-run or twice per run.
 - Handle the new session events `thinking_level_changed`, `session_info_changed`, `entry_appended`, `summarization_retry_scheduled`/`finished`, and `compaction_end.errorMessage`; unknown events remain ignored.
-- Respect `data.disposition` on `prompt` responses: a prompt consumed by an extension or input handler (`"handled"`) no longer leaves the UI waiting for a run that never starts.
+- Respect `data.disposition` on `prompt` responses: a prompt consumed by an extension or input handler (`"handled"`) no longer leaves the UI waiting for a run that never starts, and a consumed steer/follow-up drops its optimistic queued bubble while preserving the composer draft.
 - Expose the full current command surface in the client: `follow_up`, `clear_queue`, `get_available_thinking_levels`, `set_session_name`, `compact`, and `export_html` (typed methods added; `RpcCommand` covers every stdin command).
-- Queue follow-ups: a ⏭ button in the composer queues the draft to run after the current run; Esc/abort first clears the pi queue and restores the queued drafts into the composer, and the queue bar gains a ✕ clear button.
-- Cycle thinking levels only among the levels the current model actually supports (`get_available_thinking_levels`, refetched on model change).
+- Queue follow-ups: a ⏭ button in the composer queues the draft to run after the current run; Esc/abort first clears the pi queue (without letting a slow `clear_queue` reply delay the `abort`) and restores the queued drafts into the composer; the queue bar gains a ✕ clear button that also restores drafts; queued bubbles settle into normal messages once the run consumes them.
+- Cycle thinking levels only among the levels the current model actually supports (`get_available_thinking_levels`, refetched on model change and retried after a failed fetch); the fallback list now includes `max` so a `max`-level model is never reset to `off` by a click.
+- Coalesce bursty metadata events (`thinking_level_changed`, `session_info_changed`, `entry_appended`) into a single debounced state+stats refresh; `compact` uses a 10-minute request timeout and reports abort/failure as a warning instead of an extension error.
 - New commands: `Pi: Compact Conversation`, `Pi: Rename Session`, `Pi: Export Session as HTML`.
 - Update RPC type contracts: `get_commands` uses `sourceInfo`, `get_state` carries steering/follow-up modes, message counts, and auto-compaction flag; `message_update` gains cumulative `usage`.
 

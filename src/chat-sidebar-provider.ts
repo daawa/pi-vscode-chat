@@ -66,12 +66,26 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
   selectModel(notify = false): Promise<void> { return this.models.selectModel(notify); }
 
   /** Interactive abort: pi continues queued messages after abort, so clear the queue
-   * first and restore the drafts in the composer (rpc-commands.md, clear_queue). */
+   * first and restore the drafts in the composer (rpc-commands.md, clear_queue). Both
+   * command lines are written to stdin immediately and in order; the clear_queue
+   * response is awaited asynchronously so a slow reply can never delay the abort. */
   async abort(): Promise<void> {
-    const queue = await this.pi.clearQueue().catch(() => null);
-    const drafts = [...(queue?.steering || []), ...(queue?.followUp || [])];
-    if (drafts.length) this.postMessage({ type: 'setInputText', text: drafts.join('\n\n'), append: true });
+    this.restoreQueueDrafts(this.pi.clearQueue());
     await this.pi.abort();
+  }
+
+  /** Drop queued messages and put their text back into the composer.
+   * Used by both interactive abort (Esc) and the queue bar's clear button. */
+  private restoreQueueDrafts(cleared: Promise<{ steering: string[]; followUp: string[] }>): void {
+    void cleared.then(queue => {
+      if (this.disposed || (!queue.steering.length && !queue.followUp.length)) return;
+      this.postMessage({ type: 'queueCleared', steering: queue.steering, followUp: queue.followUp });
+      this.postMessage({
+        type: 'setInputText',
+        text: [...queue.steering, ...queue.followUp].join('\n\n'),
+        append: true,
+      });
+    }).catch(() => {/* pi unavailable or command unsupported: nothing to restore */});
   }
 
   /** Shared typed entry point for UI commands; all asynchronous failures are observed. */
@@ -85,7 +99,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
         case 'runCommand': await this.session.runCommand(message.command); break;
         case 'ready': await this.session.ready(); break;
         case 'abort': await this.abort(); break;
-        case 'clearQueue': await this.pi.clearQueue(); break;
+        case 'clearQueue': this.restoreQueueDrafts(this.pi.clearQueue()); break;
         case 'newSession': await this.newSession(); break;
         case 'resumeSession': await this.session.resumeSession(message.filePath); break;
         case 'getSessions': this.postMessage({ type: 'sessionsList', sessions: await this.repository.list() }); break;

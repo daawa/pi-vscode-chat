@@ -18,7 +18,7 @@ export function createShell(vscode) {
   const btnModel = $('btn-model');
   const btnThinking = $('btn-thinking');
   const thinkingLevelEl = $('thinking-level');
-  const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+  const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   let thinkingLevels = THINKING_LEVELS;
   function applyStyle(style) {
     // Only use bundled stylesheet URLs supplied by the extension host.

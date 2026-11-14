@@ -48,6 +48,8 @@ export type WebviewOutMessage =
   | { type: 'stats'; stats: SessionStats | null }
   | { type: 'attachmentsSelected'; requestId: string; attachments: Attachment[]; errors: string[] }
   | { type: 'promptResult'; submissionId: string; success: boolean; error?: string }
+  | { type: 'promptHandled'; submissionId: string }
+  | { type: 'queueCleared'; steering: string[]; followUp: string[] }
   | { type: 'clearComposer' }
   | { type: 'loadHistory'; messages: AgentMessage[] }
   | { type: 'historyLoading'; loading: boolean }

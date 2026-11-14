@@ -93,8 +93,10 @@ describe('tool completion bridge', () => {
     expect(messages.map(m => m.type)).toEqual(['toolEnd']);
     expect(messages[0].isError).toBe(false);
 
+    pi.emit('event', { type: 'agent_start' });
     pi.emit('event', { type: 'agent_end', messages: [] });
-    expect(messages.slice(0, 2).map(m => m.type)).toEqual(['toolEnd', 'agentEnd']);
+    pi.emit('event', { type: 'agent_settled', aborted: false });
+    expect(messages.map(m => m.type).slice(0, 3)).toEqual(['toolEnd', 'agentStart', 'agentEnd']);
     expect(messages.some(m => m.type === 'toolDiff')).toBe(false);
 
     release(Buffer.from('new content'));

@@ -95,7 +95,7 @@ export class RpcTransport extends EventEmitter<TransportEvents> {
     this.removeAllListeners();
   }
 
-  request(command: RpcCommand): Promise<RpcResponse> {
+  request(command: RpcCommand, timeoutMs?: number): Promise<RpcResponse> {
     const connection = this.current;
     if (!connection || !this.isRunning) return Promise.reject(new Error('pi not running'));
     const id = command.id || `req-${++this.requestId}`;
@@ -105,7 +105,7 @@ export class RpcTransport extends EventEmitter<TransportEvents> {
       const timeout = setTimeout(() => {
         connection.pending.delete(id);
         reject(new Error(`RPC command ${command.type} timed out`));
-      }, this.options.requestTimeoutMs ?? 60000);
+      }, timeoutMs ?? this.options.requestTimeoutMs ?? 60000);
       const pending = {
         command: command.type,
         resolve: (response: RpcResponse) => { clearTimeout(timeout); resolve(response); },
