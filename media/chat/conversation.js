@@ -259,13 +259,16 @@ export function createConversation({ vscode, state, saveState }) {
     }
   }
 
-  /** Remove the bubbles for messages dropped by clear_queue. A bubble that is both
-   *  confirmed and still queued was in pi's queue when it was cleared, whatever text
-   *  pi stored for it; their text returns to the composer via setInputText. */
-  function removeQueuedMessages() {
-    [...document.querySelectorAll('.message.user.queued')]
-      .filter(el => el.dataset.queuedConfirmed === 'true')
-      .forEach(el => el.remove());
+  /** Remove only entries actually returned by clear_queue. Older entries may have
+   *  been consumed while the request was in flight; the buffered queue update will
+   *  settle those after removal. Text may have been transformed by pi. */
+  function removeQueuedMessages(steering = [], followUp = []) {
+    for (const [behavior, removed] of [['steer', steering], ['followUp', followUp]]) {
+      if (!removed?.length) continue;
+      [...messagesEl.querySelectorAll('.message.user.queued')]
+        .filter(el => el.dataset.queuedConfirmed === 'true' && el.dataset.queueBehavior === behavior)
+        .slice(-removed.length).forEach(el => el.remove());
+    }
     saveState();
   }
 

@@ -31,6 +31,7 @@ export class SessionController implements vscode.Disposable {
     private readonly onEditChanged: (record: EditRecord) => void,
   ) {}
 
+  get generation(): number { return this.epoch; }
   get loading(): boolean { return this.historyLoading; }
   get submitting(): boolean { return this.promptPending; }
 
@@ -152,7 +153,7 @@ export class SessionController implements vscode.Disposable {
       // even if the flags disagree, so the draft is never silently downgraded.
       const streamingNow = streaming || this.isStreaming;
       const wantsFollowUp = behavior === 'followUp' && (!isCommand || !!images?.length);
-      const queued = (!!streaming || wantsFollowUp) && !isCommand;
+      const queued = (!!streamingNow || wantsFollowUp) && !isCommand;
       // Echo before streamed output, but remove this bubble if Pi rejects preflight.
       this.postMessage({ type: 'userMessage', text, images, queued, queueBehavior: queued ? (wantsFollowUp ? 'followUp' : 'steer') : undefined, submissionId });
       if (!streamingNow && !isCommand) {
@@ -168,7 +169,7 @@ export class SessionController implements vscode.Disposable {
       if (this.disposed) return;
       if (!result.success) throw new Error(result.error || 'Failed to send prompt to pi');
       const disposition = responseDisposition(result);
-      if (disposition === 'handled' && (streaming || wantsFollowUp) && !isCommand && submissionId) {
+      if (disposition === 'handled' && queued && submissionId) {
         // An extension/input handler consumed the prompt: no run, no queue entry.
         // Drop the optimistic queued bubble and keep the draft for re-editing.
         this.postMessage({ type: 'promptHandled', submissionId });

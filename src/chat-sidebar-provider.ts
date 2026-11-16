@@ -19,6 +19,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
   private view?: vscode.WebviewView;
   private viewSubscriptions: vscode.Disposable[] = [];
   private disposed = false;
+  private clearingQueue = false;
+  private bufferedQueueUpdate?: Extract<WebviewOutMessage, { type: 'queueUpdate' }>;
   private readonly files: FileAttachments;
   private readonly repository: SessionRepository;
   private readonly models: ModelService;
@@ -70,7 +72,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
    * command lines are written to stdin immediately and in order; the clear_queue
    * response is awaited asynchronously so a slow reply can never delay the abort. */
   async abort(): Promise<void> {
-    this.restoreQueueDrafts(this.pi.clearQueue());
+    this.restoreQueueDrafts();
     await this.pi.abort();
   }
 
@@ -78,16 +80,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
    * Used by both interactive abort (Esc) and the queue bar's clear button.
    * Note: clear_queue returns text only, so images attached to queued messages
    * cannot be restored — they are consumed with the queued message itself. */
-  private restoreQueueDrafts(cleared: Promise<{ steering: string[]; followUp: string[] }>): void {
-    void cleared.then(queue => {
-      if (this.disposed || (!queue.steering.length && !queue.followUp.length)) return;
+  private restoreQueueDrafts(): void {
+    if (this.clearingQueue) return;
+    this.clearingQueue = true;
+    const generation = this.session.generation;
+    // clear_queue emits queue_update BEFORE its response. Defer reconciliation
+    // until the removed bubbles are known, rather than treating them as delivered.
+    void this.pi.clearQueue().then(queue => {
+      if (this.disposed || generation !== this.session.generation) return;
       this.postMessage({ type: 'queueCleared', steering: queue.steering, followUp: queue.followUp });
-      this.postMessage({
+      if (queue.steering.length || queue.followUp.length) this.postMessage({
         type: 'setInputText',
         text: [...queue.steering, ...queue.followUp].join('\n\n'),
         append: true,
       });
-    }).catch(() => {/* pi unavailable or command unsupported: nothing to restore */});
+    }).catch(() => {/* pi unavailable or command unsupported: nothing to restore */})
+      .finally(() => {
+        const update = this.bufferedQueueUpdate;
+        this.bufferedQueueUpdate = undefined;
+        this.clearingQueue = false;
+        if (update && generation === this.session.generation) this.postMessage(update);
+      });
   }
 
   /** Shared typed entry point for UI commands; all asynchronous failures are observed. */
@@ -101,7 +114,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
         case 'runCommand': await this.session.runCommand(message.command); break;
         case 'ready': await this.session.ready(); break;
         case 'abort': await this.abort(); break;
-        case 'clearQueue': this.restoreQueueDrafts(this.pi.clearQueue()); break;
+        case 'clearQueue': this.restoreQueueDrafts(); break;
         case 'newSession': await this.newSession(); break;
         case 'resumeSession': await this.session.resumeSession(message.filePath); break;
         case 'getSessions': this.postMessage({ type: 'sessionsList', sessions: await this.repository.list() }); break;
@@ -135,6 +148,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider, vscode.D
   }
 
   private postMessage(message: WebviewOutMessage): void {
+    if (this.clearingQueue && message.type === 'queueUpdate') {
+      this.bufferedQueueUpdate = message;
+      return;
+    }
     if (!this.disposed && this.view) {
       void Promise.resolve(this.view.webview.postMessage(message)).catch(error => console.warn('[pi] webview message failed:', error));
     }

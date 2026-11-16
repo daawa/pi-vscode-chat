@@ -61,7 +61,7 @@ window.addEventListener('message', ({ data: msg }) => {
       conversation.settleQueuedMessages(msg.steering, msg.followUp);
       break;
     case 'queueCleared':
-      conversation.removeQueuedMessages();
+      conversation.removeQueuedMessages(msg.steering, msg.followUp);
       panels.renderQueue([], []);
       break;
     case 'retryStatus': panels.updateStatus('__retry', msg.text || undefined); break;

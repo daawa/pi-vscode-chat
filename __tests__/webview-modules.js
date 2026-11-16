@@ -193,6 +193,20 @@
     assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide after clear');
   });
 
+  test('clear response removes only returned entries before buffered consumption is reconciled', () => {
+    for (const id of ['consumed', 'cleared']) {
+      send({ type: 'userMessage', text: id, queued: true, submissionId: id, queueBehavior: 'followUp' });
+      send({ type: 'promptResult', submissionId: id, success: true, queued: true });
+    }
+    // Host buffers pi's empty queue_update until after this response. Only the
+    // newest entry was cleared; the older one was consumed just before clearing.
+    send({ type: 'queueCleared', steering: [], followUp: ['expanded cleared text'] });
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    assert(!document.querySelector('[data-submission-id="cleared"]'), 'Cleared entry survived');
+    const consumed = document.querySelector('[data-submission-id="consumed"]');
+    assert(consumed && !consumed.classList.contains('queued'), 'Consumed entry was removed instead of settled');
+  });
+
   test('an early follow-up stays below current tools and text, above its own reply', () => {
     send({ type: 'userMessage', text: 'current task' });
     send({ type: 'agentStart' });

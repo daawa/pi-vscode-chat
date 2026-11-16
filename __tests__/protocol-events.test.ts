@@ -151,6 +151,51 @@ describe('queue and abort semantics', () => {
     expect(messages.find(m => m.type === 'setInputText')).toMatchObject({ text: 'later', append: true });
   });
 
+  test('clear_queue removes bubbles before forwarding its empty queue_update', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.clearQueue.mockImplementationOnce(async () => {
+      pi.emit('event', { type: 'queue_update', steering: [], followUp: [] });
+      return { steering: [], followUp: ['later'] };
+    });
+    await provider.handleMessage({ type: 'clearQueue' });
+    await sleep(0);
+    const queueEvents = messages.filter(m => m.type === 'queueCleared' || m.type === 'queueUpdate');
+    expect(queueEvents.map(m => m.type)).toEqual(['queueCleared', 'queueUpdate']);
+    expect(queueEvents[0].followUp).toEqual(['later']);
+  });
+
+  test('a failed clear request releases buffered queue updates', async () => {
+    const { pi, provider, messages } = await createProvider();
+    pi.clearQueue.mockImplementationOnce(async () => {
+      pi.emit('event', { type: 'queue_update', steering: ['pending'], followUp: [] });
+      throw new Error('unsupported');
+    });
+    await provider.handleMessage({ type: 'clearQueue' });
+    await sleep(0);
+    expect(messages.some(m => m.type === 'queueCleared')).toBe(false);
+    expect(messages.find(m => m.type === 'queueUpdate')).toMatchObject({ steering: ['pending'] });
+  });
+
+  test('a delayed clear response cannot restore drafts into a different session', async () => {
+    const { pi, provider, messages } = await createProvider();
+    let resolve!: (queue: { steering: string[]; followUp: string[] }) => void;
+    pi.clearQueue.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await provider.handleMessage({ type: 'clearQueue' });
+    await provider.newSession();
+    resolve({ steering: ['old session draft'], followUp: [] });
+    await sleep(0);
+    expect(messages.some(m => m.type === 'queueCleared' || m.type === 'setInputText')).toBe(false);
+  });
+
+  test('a stale idle webview still marks a host-streaming steer as queued', async () => {
+    const { pi, provider, messages } = await createProvider();
+    await provider.session.setStreaming(true);
+    pi.prompt.mockResolvedValueOnce({ success: true, data: { disposition: 'queued' } });
+    await provider.handleMessage({ type: 'prompt', text: 'change direction', streaming: false, submissionId: 'stale-steer' });
+    expect(messages.find(m => m.type === 'userMessage')).toMatchObject({ queued: true, queueBehavior: 'steer' });
+    expect(pi.prompt).toHaveBeenCalledWith('change direction', undefined, 'steer');
+  });
+
   test('a steer consumed by an input handler drops its queued bubble and keeps the draft', async () => {
     const { pi, provider, messages } = await createProvider();
     pi.prompt.mockResolvedValueOnce({ success: true, data: { disposition: 'handled' } });
