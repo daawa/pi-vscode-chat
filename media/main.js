@@ -35,7 +35,7 @@ window.addEventListener('message', ({ data: msg }) => {
     case 'loadHistory': conversation.renderHistory(msg.messages || []); break;
     case 'historyLoading': composer.setHistoryLoading(msg.loading); break;
     case 'sessionsList': shell.renderSessions(msg); break;
-    case 'userMessage': conversation.addUserMessage(msg.text, msg.queued, msg.images, msg.submissionId); break;
+    case 'userMessage': conversation.addUserMessage(msg.text, msg.queued, msg.images, msg.submissionId, msg.queueBehavior); break;
     case 'promptResult':
       composer.handlePromptResult(msg);
       // The host tells us whether pi actually queued the prompt (disposition "queued").

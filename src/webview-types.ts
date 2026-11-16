@@ -64,7 +64,7 @@ export type WebviewOutMessage =
   | { type: 'toolUpdate'; toolCallId: string; output: string }
   | { type: 'toolEnd'; messageId: string; toolCallId: string; toolName: string; isError: boolean; output?: string }
   | { type: 'toolDiff'; toolCallId: string; diff: string; filePath: string; fileContent?: string }
-  | { type: 'userMessage'; text: string; images?: PromptImage[]; files?: string[]; queued?: boolean; submissionId?: string }
+  | { type: 'userMessage'; text: string; images?: PromptImage[]; files?: string[]; queued?: boolean; queueBehavior?: 'steer' | 'followUp'; submissionId?: string }
   | { type: 'fileResults'; query: string; results: { label: string; path: string }[] }
   | { type: 'setInputText'; text: string; append?: boolean }
   | { type: 'editRecorded'; filePath: string; editId: string; diff: string }

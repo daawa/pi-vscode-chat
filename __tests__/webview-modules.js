@@ -165,7 +165,7 @@
 
   test('queued bubbles confirm, settle by count, survive transformed text, and clear', () => {
     send({ type: 'userMessage', text: 'steer it', queued: true, submissionId: 'q1' });
-    send({ type: 'userMessage', text: 'later', queued: true, submissionId: 'q2' });
+    send({ type: 'userMessage', text: 'later', queued: true, submissionId: 'q2', queueBehavior: 'followUp' });
     const queued = () => document.querySelectorAll('.message.user.queued');
     assert(queued().length === 2, 'Queued bubbles missing');
     // A queue_update that predates acknowledgment must not settle the new bubbles
@@ -191,6 +191,76 @@
     send({ type: 'queueCleared', steering: ['EXPANDED SKILL CONTENT'], followUp: ['later'] });
     assert(!document.querySelector('.message.user.queued'), 'Cleared bubbles survived');
     assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide after clear');
+  });
+
+  test('an early follow-up stays below current tools and text, above its own reply', () => {
+    send({ type: 'userMessage', text: 'current task' });
+    send({ type: 'agentStart' });
+    send({ type: 'userMessage', text: 'fjdsk', queued: true, submissionId: 'early-follow', queueBehavior: 'followUp' });
+    send({ type: 'promptResult', submissionId: 'early-follow', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: [], followUp: ['fjdsk'] });
+    send({ type: 'toolStart', messageId: 'current', toolCallId: 'before-follow', toolName: 'read', args: '{}' });
+    send({ type: 'toolEnd', toolCallId: 'before-follow', isError: false, output: 'ok' });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Current task finished.' });
+    const follow = document.querySelector('[data-submission-id="early-follow"]');
+    const current = document.querySelector('.message.assistant');
+    assert(current.nextElementSibling === follow, 'Early follow-up appeared above the current assistant reply');
+    assert(current.querySelector('#tool-before-follow'), 'Current tool was misplaced');
+    assert(follow.classList.contains('queued'), 'Follow-up settled before consumption');
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Follow-up answer.' });
+    send({ type: 'agentEnd' });
+    assert(current.textContent.includes('Current task finished.'), 'Current reply lost');
+    assert(follow.previousElementSibling === current, 'Consumed follow-up moved above current reply');
+    assert(follow.nextElementSibling?.textContent.includes('Follow-up answer.'), 'Follow-up answer is not below its prompt');
+    assert(!current.textContent.includes('Follow-up answer.'), 'Follow-up answer merged into the current reply');
+  });
+
+  test('a later steer overtakes a follow-up without settling it or misordering replies', () => {
+    send({ type: 'agentStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Working.' });
+    send({ type: 'userMessage', text: 'later task', queued: true, submissionId: 'later-task', queueBehavior: 'followUp' });
+    send({ type: 'promptResult', submissionId: 'later-task', success: true, queued: true });
+    send({ type: 'userMessage', text: 'change direction', queued: true, submissionId: 'priority-steer', queueBehavior: 'steer' });
+    send({ type: 'promptResult', submissionId: 'priority-steer', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: ['expanded steer'], followUp: ['expanded follow-up'] });
+    send({ type: 'queueUpdate', steering: [], followUp: ['expanded follow-up'] });
+    const follow = document.querySelector('[data-submission-id="later-task"]');
+    const steer = document.querySelector('[data-submission-id="priority-steer"]');
+    assert(follow.classList.contains('queued'), 'Steer consumption incorrectly settled the older follow-up');
+    assert(!steer.classList.contains('queued'), 'Consumed steer stayed pending');
+    assert(steer.nextElementSibling === follow, 'Delivered steer did not overtake the follow-up');
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Changed direction.' });
+    send({ type: 'agentEnd' });
+    assert(steer.nextElementSibling?.textContent.includes('Changed direction.'), 'Steered answer is misplaced');
+    assert(follow.previousElementSibling === steer.nextElementSibling, 'Follow-up did not remain below the active reply');
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'agentStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Later task answer.' });
+    send({ type: 'agentEnd' });
+    assert(follow.nextElementSibling?.textContent.includes('Later task answer.'), 'Next-run follow-up reply is misplaced');
+  });
+
+  test('follow-ups remain FIFO when consumed one at a time', () => {
+    send({ type: 'agentStart' });
+    for (const id of ['follow-1', 'follow-2']) {
+      send({ type: 'userMessage', text: id, queued: true, submissionId: id, queueBehavior: 'followUp' });
+      send({ type: 'promptResult', submissionId: id, success: true, queued: true });
+    }
+    send({ type: 'textDelta', messageId: 'current', delta: 'Original reply.' });
+    send({ type: 'queueUpdate', steering: [], followUp: ['follow-2'] });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'First follow-up reply.' });
+    send({ type: 'agentEnd' });
+    const first = document.querySelector('[data-submission-id="follow-1"]');
+    const second = document.querySelector('[data-submission-id="follow-2"]');
+    assert(!first.classList.contains('queued') && second.classList.contains('queued'), 'Wrong follow-up consumed');
+    assert(first.previousElementSibling?.textContent.includes('Original reply.'), 'Original reply is misplaced');
+    assert(first.nextElementSibling?.textContent.includes('First follow-up reply.'), 'First follow-up reply is misplaced');
+    assert(second.previousElementSibling === first.nextElementSibling, 'Second follow-up is ahead of the first reply');
   });
 
   test('a handled prompt drops its optimistic bubble and keeps the draft editable', () => {

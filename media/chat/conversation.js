@@ -70,12 +70,14 @@ export function createConversation({ vscode, state, saveState }) {
     }
     msg.appendChild(createElement('div', 'message-content'));
 
-    messagesEl.appendChild(msg);
+    // Pending input is not part of the delivered transcript yet. In particular,
+    // a follow-up sent before the first delta must stay BELOW the current reply.
+    messagesEl.insertBefore(msg, messagesEl.querySelector('.message.user.queued'));
     scrollToBottom();
     return msg;
   }
 
-  function addUserMessage(text, queued, images = [], submissionId) {
+  function addUserMessage(text, queued, images = [], submissionId, queueBehavior) {
     clearWelcome();
     const msg = createElement('div', `message user${queued ? ' queued' : ''}`);
     const content = createElement('div', 'message-content');
@@ -99,7 +101,11 @@ export function createConversation({ vscode, state, saveState }) {
     }
     msg.appendChild(content);
     if (queued) {
-      msg.appendChild(createElement('div', 'queued-tag', 'queued'));
+      msg.dataset.queueBehavior = queueBehavior === 'followUp' ? 'followUp' : 'steer';
+      const isFollowUp = queueBehavior === 'followUp';
+      const tag = createElement('div', `queued-tag ${isFollowUp ? 'tag-follow' : 'tag-steer'}`);
+      tag.textContent = isFollowUp ? '⏭ queued · runs after this run' : '↪ steering · injected into current run';
+      msg.appendChild(tag);
     }
     messagesEl.appendChild(msg);
     scrollToBottom(true);
@@ -219,6 +225,10 @@ export function createConversation({ vscode, state, saveState }) {
   function settleQueuedBubble(el) {
     el.classList.remove('queued');
     delete el.dataset.queuedConfirmed;
+    delete el.dataset.queueBehavior;
+    // Consumption order can differ from submission order: a later steer may be
+    // delivered before an earlier follow-up. Put delivered input before the queue.
+    messagesEl.insertBefore(el, messagesEl.querySelector('.message.user.queued'));
     const tag = el.querySelector('.queued-tag');
     if (tag) tag.remove();
     saveState();
@@ -238,15 +248,15 @@ export function createConversation({ vscode, state, saveState }) {
     if (el && el.classList.contains('queued')) settleQueuedBubble(el);
   }
 
-  /** Reconcile confirmed queued bubbles with the current pi queue. The pending queue
-   *  entries correspond to the most recent confirmed bubbles, so everything older was
-   *  consumed by a run. Matching is count-based, not text-based: pi may store
-   *  transformed text (expanded skills/templates, inline attachments). */
+  /** Reconcile each queue independently: steering can overtake follow-ups.
+   *  Within each queue, the newest confirmed bubbles are still pending. Compare
+   *  counts, not text, because pi can expand templates and attachments. */
   function settleQueuedMessages(steering = [], followUp = []) {
-    const pendingCount = (steering || []).length + (followUp || []).length;
-    const confirmed = [...document.querySelectorAll('.message.user.queued')]
-      .filter(el => el.dataset.queuedConfirmed === 'true');
-    confirmed.slice(0, Math.max(0, confirmed.length - pendingCount)).forEach(settleQueuedBubble);
+    for (const [behavior, pending] of [['steer', steering], ['followUp', followUp]]) {
+      const confirmed = [...messagesEl.querySelectorAll('.message.user.queued')]
+        .filter(el => el.dataset.queuedConfirmed === 'true' && el.dataset.queueBehavior === behavior);
+      confirmed.slice(0, Math.max(0, confirmed.length - (pending || []).length)).forEach(settleQueuedBubble);
+    }
   }
 
   /** Remove the bubbles for messages dropped by clear_queue. A bubble that is both

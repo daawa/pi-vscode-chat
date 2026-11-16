@@ -152,8 +152,9 @@ export class SessionController implements vscode.Disposable {
       // even if the flags disagree, so the draft is never silently downgraded.
       const streamingNow = streaming || this.isStreaming;
       const wantsFollowUp = behavior === 'followUp' && (!isCommand || !!images?.length);
+      const queued = (!!streaming || wantsFollowUp) && !isCommand;
       // Echo before streamed output, but remove this bubble if Pi rejects preflight.
-      this.postMessage({ type: 'userMessage', text, images, queued: (!!streaming || wantsFollowUp) && !isCommand, submissionId });
+      this.postMessage({ type: 'userMessage', text, images, queued, queueBehavior: queued ? (wantsFollowUp ? 'followUp' : 'steer') : undefined, submissionId });
       if (!streamingNow && !isCommand) {
         started = true;
         this.setStreaming(true);

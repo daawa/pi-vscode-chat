@@ -131,6 +131,8 @@ button { font-family: var(--font); }
   text-align: right;
   margin-top: 2px;
 }
+.queued-tag.tag-steer { color: var(--link); font-weight: 600; }
+.queued-tag.tag-follow { color: var(--vscode-editorWarning-foreground, #cca700); font-weight: 600; }
 
 /* Assistant — full width, subtle divider */
 .message.assistant {
@@ -664,7 +666,18 @@ pre:hover .code-copy { opacity: 1; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.queue-chip.steer { border-color: color-mix(in srgb, var(--link) 40%, transparent); }
+.queue-chip.steer {
+  border-color: color-mix(in srgb, var(--link) 45%, transparent);
+  background: color-mix(in srgb, var(--link) 10%, transparent);
+  color: var(--link);
+  font-weight: 600;
+}
+.queue-chip.follow {
+  border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 45%, transparent);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 10%, transparent);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-weight: 600;
+}
 .queue-clear {
   font-size: 10.5px;
   line-height: 1;
@@ -843,8 +856,9 @@ pre:hover .code-copy { opacity: 1; }
 .icon-button.send { color: var(--link); }
 .icon-button.send:disabled { opacity: 0.35; cursor: default; }
 .icon-button.send:not(:disabled):hover { background: var(--hover); }
-.icon-button.followup { color: var(--text-dim); }
-.icon-button.followup:hover { background: var(--hover); color: var(--link); }
+.icon-button.followup { color: var(--text-dim); gap: 3px; }
+.icon-button.followup:hover { background: var(--hover); color: var(--vscode-editorWarning-foreground, #cca700); }
+.followup-label { font-size: 10px; font-weight: 600; color: inherit; }
 
 .icon-button.stop {
   border-radius: 4px;

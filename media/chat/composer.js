@@ -55,7 +55,7 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     inputEl.placeholder = historyLoading
       ? 'Loading session history…'
       : isStreaming
-        ? 'Steer the agent — Enter to send, Esc to stop'
+        ? 'Steer the agent — Enter steers the current run; use the ⏭ button to queue for after'
         : 'Ask Pi — @ for files, / for commands';
   }
 
