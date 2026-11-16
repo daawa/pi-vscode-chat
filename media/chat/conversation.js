@@ -178,11 +178,10 @@ export function createConversation({ vscode, state, saveState }) {
     state.accumulatedText = '';
   }
 
-  /** A new assistant turn started. A steer delivered between turns inserts a user
-   *  message after the current assistant bubble; the reply to it must render in a
-   *  fresh bubble BELOW that message, not continue the old bubble above it.
-   *  Still-queued bubbles are ignored: their message has not been delivered yet.
-   *  Plain tool-loop turns (no interleaved delivered user message) keep the bubble. */
+  /** Check both turn_start and message_start(assistant): pi can deliver queued
+   *  input between those events. A delivered user message requires the next reply
+   *  to start BELOW it, rather than continuing the old assistant bubble above it.
+   *  Still-queued input is ignored; ordinary tool-loop turns keep their bubble. */
   function handleTurnStart() {
     const current = state.currentMessageId ? document.querySelector(`[data-msg-id="${state.currentMessageId}"]`) : null;
     if (!current) return; // no bubble yet — the next delta appends at the bottom anyway

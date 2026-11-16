@@ -84,6 +84,19 @@ describe('run lifecycle events', () => {
     expect(messages.filter(m => m.type === 'agentEnd')).toHaveLength(1);
   });
 
+  test('assistant message_start forwards a boundary after queued input is delivered', async () => {
+    const { pi, messages } = await createProvider();
+    // This is the agent-loop order: turn_start, queued user delivery (whose
+    // queue_update is emitted first by AgentSession), then assistant output.
+    pi.emit('event', { type: 'turn_start' });
+    pi.emit('event', { type: 'queue_update', steering: [], followUp: [] });
+    pi.emit('event', { type: 'message_start', message: { role: 'user', content: 'steer' } });
+    pi.emit('event', { type: 'message_start', message: { role: 'assistant', content: [] } });
+    pi.emit('event', { type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'New answer' } });
+    pi.emit('event', { type: 'message_start', message: { role: 'toolResult', content: [] } });
+    expect(messages.map(m => m.type)).toEqual(['turnStart', 'queueUpdate', 'assistantMessageStart', 'textDelta']);
+  });
+
   test('thinking_end authoritative content uses the current wire field', async () => {
     const { pi, messages } = await createProvider();
     pi.emit('event', { type: 'message_update', assistantMessageEvent: { type: 'thinking_end', contentIndex: 1, content: 'final thought' } });

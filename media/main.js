@@ -71,6 +71,7 @@ window.addEventListener('message', ({ data: msg }) => {
       composer.updateStreamingState(true);
       break;
     case 'turnStart':
+    case 'assistantMessageStart':
       conversation.handleTurnStart();
       break;
     case 'agentEnd':

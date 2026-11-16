@@ -91,9 +91,14 @@ export class EventBridge implements vscode.Disposable {
         break;
 
       case 'turn_start':
-        // Turn boundaries let the webview split the assistant bubble when a steer
-        // was interleaved, so the steered reply renders below the user message.
         this.postMessage({ type: 'turnStart' });
+        break;
+
+      case 'message_start':
+        // pi emits turn_start BEFORE delivering queued user input. Only the next
+        // assistant message_start is guaranteed to follow its queue_update, so
+        // recheck the conversation boundary here before text/thinking/tools arrive.
+        if (event.message.role === 'assistant') this.postMessage({ type: 'assistantMessageStart' });
         break;
 
       case 'message_update':

@@ -222,8 +222,9 @@
     assert(current.nextElementSibling === follow, 'Early follow-up appeared above the current assistant reply');
     assert(current.querySelector('#tool-before-follow'), 'Current tool was misplaced');
     assert(follow.classList.contains('queued'), 'Follow-up settled before consumption');
-    send({ type: 'queueUpdate', steering: [], followUp: [] });
     send({ type: 'turnStart' });
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'assistantMessageStart' });
     send({ type: 'textDelta', messageId: 'current', delta: 'Follow-up answer.' });
     send({ type: 'agentEnd' });
     assert(current.textContent.includes('Current task finished.'), 'Current reply lost');
@@ -240,13 +241,14 @@
     send({ type: 'userMessage', text: 'change direction', queued: true, submissionId: 'priority-steer', queueBehavior: 'steer' });
     send({ type: 'promptResult', submissionId: 'priority-steer', success: true, queued: true });
     send({ type: 'queueUpdate', steering: ['expanded steer'], followUp: ['expanded follow-up'] });
+    send({ type: 'turnStart' });
     send({ type: 'queueUpdate', steering: [], followUp: ['expanded follow-up'] });
     const follow = document.querySelector('[data-submission-id="later-task"]');
     const steer = document.querySelector('[data-submission-id="priority-steer"]');
     assert(follow.classList.contains('queued'), 'Steer consumption incorrectly settled the older follow-up');
     assert(!steer.classList.contains('queued'), 'Consumed steer stayed pending');
     assert(steer.nextElementSibling === follow, 'Delivered steer did not overtake the follow-up');
-    send({ type: 'turnStart' });
+    send({ type: 'assistantMessageStart' });
     send({ type: 'textDelta', messageId: 'current', delta: 'Changed direction.' });
     send({ type: 'agentEnd' });
     assert(steer.nextElementSibling?.textContent.includes('Changed direction.'), 'Steered answer is misplaced');
@@ -265,8 +267,9 @@
       send({ type: 'promptResult', submissionId: id, success: true, queued: true });
     }
     send({ type: 'textDelta', messageId: 'current', delta: 'Original reply.' });
-    send({ type: 'queueUpdate', steering: [], followUp: ['follow-2'] });
     send({ type: 'turnStart' });
+    send({ type: 'queueUpdate', steering: [], followUp: ['follow-2'] });
+    send({ type: 'assistantMessageStart' });
     send({ type: 'textDelta', messageId: 'current', delta: 'First follow-up reply.' });
     send({ type: 'agentEnd' });
     const first = document.querySelector('[data-submission-id="follow-1"]');
@@ -295,13 +298,16 @@
     send({ type: 'userMessage', text: 'say BANANA instead', queued: true, submissionId: 's1' });
     // Still queued: a tool-loop turn must NOT split below it (message not delivered yet).
     send({ type: 'turnStart' });
+    send({ type: 'assistantMessageStart' });
     send({ type: 'textDelta', messageId: 'current', delta: ' (tool loop continues)' });
     send({ type: 'agentEnd' }); // flush renders
     assert(document.querySelectorAll('.message.assistant').length === 1, 'Queued (undelivered) bubble split the assistant message');
-    // Delivered: acknowledged and consumed → settled → the next turn splits below it.
+    // Real pi order: turn_start precedes queued user delivery (queue_update),
+    // then message_start(assistant). Checking only turn_start misses the split.
     send({ type: 'promptResult', submissionId: 's1', success: true, queued: true });
-    send({ type: 'queueUpdate', steering: [], followUp: [] });
     send({ type: 'turnStart' });
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'assistantMessageStart' });
     send({ type: 'textDelta', messageId: 'current', delta: 'BANANA' });
     send({ type: 'agentEnd' });
     const bubbles = document.querySelectorAll('.message.assistant');
@@ -312,6 +318,34 @@
     assert(order[0].includes('assistant') && order[1].includes('user') && order[2].includes('assistant'),
       `Conversation order wrong: ${order.join(' | ')}`);
   });
+
+  for (const firstBlock of ['thinking', 'tool']) {
+    test(`a consumed steer starts a fresh bubble even when the reply begins with ${firstBlock}`, () => {
+      send({ type: 'agentStart' });
+      send({ type: 'textDelta', messageId: 'current', delta: 'Original answer.' });
+      send({ type: 'userMessage', text: '好久了', queued: true, submissionId: 'boundary-steer', queueBehavior: 'steer' });
+      send({ type: 'promptResult', submissionId: 'boundary-steer', success: true, queued: true });
+      send({ type: 'turnStart' });
+      send({ type: 'queueUpdate', steering: [], followUp: [] });
+      send({ type: 'assistantMessageStart' });
+      if (firstBlock === 'thinking') {
+        send({ type: 'thinkingDelta', messageId: 'current', blockIndex: 0, delta: 'New reasoning' });
+        send({ type: 'thinkingEnd', messageId: 'current', blockIndex: 0, content: 'New reasoning' });
+      } else {
+        send({ type: 'toolStart', messageId: 'current', toolCallId: 'steered-tool', toolName: 'read', args: '{}' });
+        send({ type: 'toolEnd', toolCallId: 'steered-tool', isError: false, output: 'ok' });
+      }
+      send({ type: 'textDelta', messageId: 'current', delta: 'New answer.' });
+      send({ type: 'agentEnd' });
+      const bubbles = document.querySelectorAll('.message.assistant');
+      const user = document.querySelector('[data-submission-id="boundary-steer"]');
+      assert(bubbles.length === 2, 'Reply reused the old assistant bubble');
+      assert(user.previousElementSibling === bubbles[0] && user.nextElementSibling === bubbles[1], 'Steer is not between the replies');
+      assert(bubbles[0].textContent.includes('Original answer.') && !bubbles[0].textContent.includes('New'), 'Original answer changed');
+      assert(bubbles[1].textContent.includes('New answer.'), 'New answer missing');
+      assert(bubbles[1].querySelector(firstBlock === 'thinking' ? '.thinking-block' : '#tool-steered-tool'), 'First reply block is misplaced');
+    });
+  }
 
   test('host draft edits sent during acknowledgment are buffered, not dropped', () => {
     type('steer this');

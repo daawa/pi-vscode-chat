@@ -57,6 +57,7 @@ export type WebviewOutMessage =
   | { type: 'agentStart' }
   | { type: 'agentEnd' }
   | { type: 'turnStart' }
+  | { type: 'assistantMessageStart' }
   | { type: 'textDelta'; messageId: string; delta: string }
   | { type: 'thinkingDelta'; messageId: string; blockIndex: number; delta: string }
   | { type: 'thinkingEnd'; messageId: string; blockIndex: number; content: string }
