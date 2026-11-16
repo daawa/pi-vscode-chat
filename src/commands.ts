@@ -23,7 +23,50 @@ export function registerCommands(
     command('piChat.selectModel', () => sidebar.selectModel(true)),
     command('piChat.acceptEdit', id => { if (typeof id === 'string') edits.acceptEdit(id); }),
     command('piChat.rejectEdit', id => { if (typeof id === 'string') return edits.revertEdit(id); }),
-    command('piChat.abort', () => pi.abort()),
+    command('piChat.abort', () => sidebar.abort()),
+    command('piChat.compact', async () => {
+      const instructions = await vscode.window.showInputBox({
+        prompt: 'Optional compaction instructions (empty for default)',
+        placeHolder: 'e.g. Focus on code changes',
+      });
+      if (instructions === undefined) return; // cancelled
+      const state = await pi.getState().catch(() => null);
+      if (state?.isStreaming) {
+        void vscode.window.showWarningMessage('Pi Chat: wait for the current run to finish before compacting.');
+        return;
+      }
+      // Progress is visible via the compaction status chip; this notification makes the
+      // (potentially minutes-long) wait cancellable — aborting the session aborts
+      // compaction — and bounds the wait to the request timeout instead of hanging silent.
+      const outcome = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Pi Chat: compacting conversation…', cancellable: true },
+        (_progress, token) => new Promise<string>(resolve => {
+          token.onCancellationRequested(() => { void pi.abort().catch(() => {}); });
+          void pi.compact(instructions.trim() || undefined)
+            .then(ok => resolve(ok ? 'compacted' : 'incomplete'))
+            .catch(() => resolve('failed'));
+        }),
+      );
+      if (outcome === 'compacted') void vscode.window.showInformationMessage('Pi Chat: conversation compacted.');
+      else if (outcome === 'incomplete') void vscode.window.showWarningMessage('Pi Chat: compaction did not complete (aborted or failed).');
+    }),
+    command('piChat.renameSession', async () => {
+      const state = await pi.getState().catch(() => null);
+      const name = await vscode.window.showInputBox({
+        prompt: 'Display name for the current session',
+        value: state?.sessionName || '',
+      });
+      if (name === undefined) return; // cancelled
+      if (!await pi.setSessionName(name.trim())) throw new Error('Failed to rename session');
+      await sidebar.session.sendState();
+    }),
+    command('piChat.exportHtml', async () => {
+      const path = await pi.exportHtml();
+      if (!path) throw new Error('Failed to export session');
+      const open = 'Open file';
+      const choice = await vscode.window.showInformationMessage(`Pi Chat: session exported to ${path}`, open);
+      if (choice === open) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path));
+    }),
     vscode.commands.registerTextEditorCommand('piChat.sendSelection', editor => {
       const selection = editor.selection;
       const text = editor.document.getText(selection);

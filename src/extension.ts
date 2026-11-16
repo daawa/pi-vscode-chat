@@ -14,7 +14,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const options = readLaunchOptions();
   const edits = new EditManager();
   const pi = new PiRpcClient(options);
-  const sidebar = new ChatSidebarProvider(context.extensionUri, String(context.extension.packageJSON.version ?? 'unknown'), pi, edits, context.workspaceState, options);
+  const sidebar = new ChatSidebarProvider(context.extensionUri, pi, edits, context.workspaceState, options);
   let disposed = false;
   const subscriptions: vscode.Disposable[] = [edits, pi, sidebar];
   const instance = {
@@ -39,8 +39,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  status.text = '$(comment-discussion) Pi';
-  status.tooltip = 'Open Pi Chat';
+  const displayName = String(context.extension.packageJSON.displayName ?? 'Pi');
+  const version = String(context.extension.packageJSON.version ?? 'unknown');
+  status.text = `$(comment-discussion) ${displayName} v${version}`;
+  status.tooltip = `Open ${displayName} Chat (v${version})`;
   status.command = 'workbench.view.extension.pi-chat';
   status.color = '#4D6BFE';
   status.show();

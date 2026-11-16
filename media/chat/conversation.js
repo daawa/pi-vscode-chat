@@ -70,17 +70,22 @@ export function createConversation({ vscode, state, saveState }) {
     }
     msg.appendChild(createElement('div', 'message-content'));
 
-    messagesEl.appendChild(msg);
+    // Pending input is not part of the delivered transcript yet. In particular,
+    // a follow-up sent before the first delta must stay BELOW the current reply.
+    messagesEl.insertBefore(msg, messagesEl.querySelector('.message.user.queued'));
     scrollToBottom();
     return msg;
   }
 
-  function addUserMessage(text, queued, images = [], submissionId) {
+  function addUserMessage(text, queued, images = [], submissionId, queueBehavior) {
     clearWelcome();
     const msg = createElement('div', `message user${queued ? ' queued' : ''}`);
     const content = createElement('div', 'message-content');
     content.textContent = text;
     if (submissionId) msg.dataset.submissionId = submissionId;
+    // Queued bubbles stay "unconfirmed" until the host acknowledges the prompt
+    // (promptResult queued:true); only confirmed bubbles are reconciled with
+    // pi's queue, so an earlier queue_update can never settle a fresh bubble.
     if (images.length) {
       const gallery = createElement('div', 'message-images');
       images.forEach(image => {
@@ -96,7 +101,11 @@ export function createConversation({ vscode, state, saveState }) {
     }
     msg.appendChild(content);
     if (queued) {
-      msg.appendChild(createElement('div', 'queued-tag', 'queued'));
+      msg.dataset.queueBehavior = queueBehavior === 'followUp' ? 'followUp' : 'steer';
+      const isFollowUp = queueBehavior === 'followUp';
+      const tag = createElement('div', `queued-tag ${isFollowUp ? 'tag-follow' : 'tag-steer'}`);
+      tag.textContent = isFollowUp ? '⏭ queued · runs after this run' : '↪ steering · injected into current run';
+      msg.appendChild(tag);
     }
     messagesEl.appendChild(msg);
     scrollToBottom(true);
@@ -169,6 +178,23 @@ export function createConversation({ vscode, state, saveState }) {
     state.accumulatedText = '';
   }
 
+  /** A new assistant turn started. A steer delivered between turns inserts a user
+   *  message after the current assistant bubble; the reply to it must render in a
+   *  fresh bubble BELOW that message, not continue the old bubble above it.
+   *  Still-queued bubbles are ignored: their message has not been delivered yet.
+   *  Plain tool-loop turns (no interleaved delivered user message) keep the bubble. */
+  function handleTurnStart() {
+    const current = state.currentMessageId ? document.querySelector(`[data-msg-id="${state.currentMessageId}"]`) : null;
+    if (!current) return; // no bubble yet — the next delta appends at the bottom anyway
+    const siblings = Array.from(messagesEl.children);
+    const userDelivered = siblings.slice(siblings.indexOf(current) + 1)
+      .some(el => el.classList && el.classList.contains('user') && !el.classList.contains('queued'));
+    if (userDelivered) {
+      flushRender(); // settle the old bubble's pending streamed text first
+      beginTurn();
+    }
+  }
+
   function endTurn() {
     flushRender();
     document.querySelectorAll('.streaming-text').forEach(el => {
@@ -194,8 +220,60 @@ export function createConversation({ vscode, state, saveState }) {
     });
   }
 
+  // ── Queue reconciliation (pi queue_update / queueCleared) ──
+
+  function settleQueuedBubble(el) {
+    el.classList.remove('queued');
+    delete el.dataset.queuedConfirmed;
+    delete el.dataset.queueBehavior;
+    // Consumption order can differ from submission order: a later steer may be
+    // delivered before an earlier follow-up. Put delivered input before the queue.
+    messagesEl.insertBefore(el, messagesEl.querySelector('.message.user.queued'));
+    const tag = el.querySelector('.queued-tag');
+    if (tag) tag.remove();
+    saveState();
+  }
+
+  /** The prompt for this bubble was acknowledged as queued (disposition "queued"):
+   *  from now on it is reconciled against pi's queue. */
+  function confirmQueuedSubmission(submissionId) {
+    const el = document.querySelector(`[data-submission-id="${submissionId}"]`);
+    if (el && el.classList.contains('queued')) el.dataset.queuedConfirmed = 'true';
+  }
+
+  /** The prompt was acknowledged but never queued (e.g. it started a run because the
+   *  streaming flag was stale): settle the bubble immediately instead of leaving it dashed. */
+  function settleQueuedSubmission(submissionId) {
+    const el = document.querySelector(`[data-submission-id="${submissionId}"]`);
+    if (el && el.classList.contains('queued')) settleQueuedBubble(el);
+  }
+
+  /** Reconcile each queue independently: steering can overtake follow-ups.
+   *  Within each queue, the newest confirmed bubbles are still pending. Compare
+   *  counts, not text, because pi can expand templates and attachments. */
+  function settleQueuedMessages(steering = [], followUp = []) {
+    for (const [behavior, pending] of [['steer', steering], ['followUp', followUp]]) {
+      const confirmed = [...messagesEl.querySelectorAll('.message.user.queued')]
+        .filter(el => el.dataset.queuedConfirmed === 'true' && el.dataset.queueBehavior === behavior);
+      confirmed.slice(0, Math.max(0, confirmed.length - (pending || []).length)).forEach(settleQueuedBubble);
+    }
+  }
+
+  /** Remove only entries actually returned by clear_queue. Older entries may have
+   *  been consumed while the request was in flight; the buffered queue update will
+   *  settle those after removal. Text may have been transformed by pi. */
+  function removeQueuedMessages(steering = [], followUp = []) {
+    for (const [behavior, removed] of [['steer', steering], ['followUp', followUp]]) {
+      if (!removed?.length) continue;
+      [...messagesEl.querySelectorAll('.message.user.queued')]
+        .filter(el => el.dataset.queuedConfirmed === 'true' && el.dataset.queueBehavior === behavior)
+        .slice(-removed.length).forEach(el => el.remove());
+    }
+    saveState();
+  }
+
   const tools = createToolCards({ vscode, state, getOrCreateMessage, scrollToBottom, saveState });
   const { renderHistory } = createHistoryRenderer({ messagesEl, state, addUserMessage, renderWelcome, scrollToBottom, saveState });
 
-  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, clear, removeRejectedMessage, enableAutoScroll: () => { autoScroll = true; } };
+  return { tools, addUserMessage, renderHistory, renderWelcome, showError, appendTextDelta, appendThinkingDelta, endThinking, beginTurn, endTurn, handleTurnStart, clear, removeRejectedMessage, confirmQueuedSubmission, settleQueuedSubmission, settleQueuedMessages, removeQueuedMessages, enableAutoScroll: () => { autoScroll = true; } };
 }

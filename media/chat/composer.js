@@ -6,6 +6,7 @@ import { bindDropInput } from './drop-input.js';
 export function createComposer({ vscode, state, showError, removeRejectedMessage, enableAutoScroll }) {
   const inputEl = $('input');
   const sendBtn = $('btn-send');
+  const followupBtn = $('btn-followup');
   const abortBtn = $('btn-abort');
   const btnAttach = $('btn-attach');
   const btnNew = $('btn-new');
@@ -30,6 +31,8 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     const unsupported = attachments.getItems().some(a => a.type === 'image') && !modelSupportsImages;
     sendBtn.disabled = !canSubmit();
     sendBtn.classList.toggle('hidden', state.isStreaming && !hasContent);
+    // While a run is active, offer queuing the draft to run after it finishes.
+    followupBtn?.classList.toggle('hidden', !state.isStreaming || !hasContent || locked);
     inputEl.readOnly = locked;
     btnAttach.disabled = locked;
     btnNew.disabled = !!pendingSubmission;
@@ -52,7 +55,7 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     inputEl.placeholder = historyLoading
       ? 'Loading session history…'
       : isStreaming
-        ? 'Steer the agent — Enter to send, Esc to stop'
+        ? 'Steer the agent — Enter steers the current run; use the ⏭ button to queue for after'
         : 'Ask Pi — @ for files, / for commands';
   }
 
@@ -67,7 +70,8 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
 
   // ── Send ──
 
-  function sendMessage() {
+  /** behavior: undefined = default (steer while streaming), 'followUp' = queue after the current run. */
+  function sendMessage(behavior) {
     if (!canSubmit()) return;
     const text = inputEl.value.trim();
 
@@ -95,7 +99,7 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
     autocomplete.hide();
     updateComposerState();
     enableAutoScroll();
-    vscode.postMessage({ type: 'prompt', submissionId: pendingSubmission, text: formattedText, images, streaming: wasStreaming });
+    vscode.postMessage({ type: 'prompt', submissionId: pendingSubmission, text: formattedText, images, streaming: wasStreaming, ...(behavior ? { behavior } : {}) });
   }
 
   function handlePromptResult(msg) {
@@ -107,15 +111,52 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
       showError(msg.error || 'Prompt rejected. Your draft has been preserved.');
       updateComposerState();
     }
+    flushBufferedInput();
     inputEl.focus();
   }
 
-  function setInputText(text, append) {
-    if (pendingSubmission) return;
+  /** An extension/input handler consumed the prompt (disposition "handled"): drop the
+   *  optimistic bubble, keep the draft for re-editing, and stay silent about it. */
+  function handlePromptHandled(msg) {
+    if (pendingSubmission !== msg.submissionId) return;
+    pendingSubmission = null;
+    removeRejectedMessage(msg.submissionId);
+    updateComposerState();
+    flushBufferedInput();
+    inputEl.focus();
+  }
+
+  // ── Host-driven draft edits (abort restore, insertPrompt) ──
+
+  let bufferedInput = null; // { text, append } held while a submission is being acknowledged
+
+  function applyInputText(text, append) {
     inputEl.value = append && inputEl.value ? inputEl.value + '\n' + text : text;
     inputEl.focus();
     inputEl.dispatchEvent(new Event('input'));
   }
+
+  function setInputText(text, append) {
+    if (pendingSubmission) {
+      // The composer is locked awaiting RPC acknowledgment (e.g. a steer being
+      // queued). Buffer the host text and apply it once unlocked — dropping it
+      // here would lose restored queue drafts on abort.
+      bufferedInput = bufferedInput
+        ? { text: bufferedInput.text + '\n\n' + text, append: bufferedInput.append || !!append }
+        : { text, append: !!append };
+      return;
+    }
+    applyInputText(text, append);
+  }
+
+  function flushBufferedInput() {
+    if (!bufferedInput || pendingSubmission) return;
+    const { text, append } = bufferedInput;
+    bufferedInput = null;
+    applyInputText(text, append);
+  }
+
+  function discardBufferedInput() { bufferedInput = null; }
 
   function setModelSupportsImages(value) {
     modelSupportsImages = !!value;
@@ -148,10 +189,11 @@ export function createComposer({ vscode, state, showError, removeRejectedMessage
       vscode.postMessage({ type: 'abort' });
     }
   });
-  sendBtn.addEventListener('click', sendMessage);
+  sendBtn.addEventListener('click', () => sendMessage());
+  followupBtn?.addEventListener('click', () => sendMessage('followUp'));
   abortBtn.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
   btnAttach.addEventListener('click', attachments.selectFiles);
   bindDropInput({ inputEl, attachments, isLocked });
 
-  return { attachments, autocomplete, isLocked, updateStreamingState, clear: clearComposer, setInputText, setModelSupportsImages, setHistoryLoading, handlePromptResult };
+  return { attachments, autocomplete, isLocked, updateStreamingState, clear: clearComposer, setInputText, discardBufferedInput, setModelSupportsImages, setHistoryLoading, handlePromptResult, handlePromptHandled };
 }

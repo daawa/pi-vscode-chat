@@ -17,8 +17,9 @@ export type ImageAttachment = PromptImage & { id: string; type: 'image'; name: s
 export type Attachment = FileAttachment | ImageAttachment;
 
 export type WebviewMessage =
-  | { type: 'prompt'; text: string; images?: PromptImage[]; streaming?: boolean; submissionId?: string }
+  | { type: 'prompt'; text: string; images?: PromptImage[]; streaming?: boolean; behavior?: 'steer' | 'followUp'; submissionId?: string }
   | { type: 'abort' }
+  | { type: 'clearQueue' }
   | { type: 'revertEdit'; editId: string }
   | { type: 'acceptEdit'; editId: string }
   | { type: 'revertAllEdits' }
@@ -41,18 +42,21 @@ export type WebviewMessage =
   | { type: 'extensionUiResponse'; id: string; value?: string; confirmed?: boolean; cancelled?: boolean };
 
 export type WebviewOutMessage =
-  | { type: 'init'; model: string; modelReasoning: boolean; modelSupportsImages: boolean; thinkingLevel: string; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
+  | { type: 'init'; model: string; modelReasoning: boolean; modelSupportsImages: boolean; thinkingLevel: string; thinkingLevels?: string[]; state: 'idle' | 'streaming'; sessionName?: string; sessionId?: string }
   | { type: 'commands'; commands: PiCommandInfo[] }
   | { type: 'styleSelected'; style: ChatStyle }
   | { type: 'stats'; stats: SessionStats | null }
   | { type: 'attachmentsSelected'; requestId: string; attachments: Attachment[]; errors: string[] }
-  | { type: 'promptResult'; submissionId: string; success: boolean; error?: string }
+  | { type: 'promptResult'; submissionId: string; success: boolean; queued?: boolean; error?: string }
+  | { type: 'promptHandled'; submissionId: string }
+  | { type: 'queueCleared'; steering: string[]; followUp: string[] }
   | { type: 'clearComposer' }
   | { type: 'loadHistory'; messages: AgentMessage[] }
   | { type: 'historyLoading'; loading: boolean }
   | { type: 'sessionsList'; sessions: SessionInfo[] }
   | { type: 'agentStart' }
   | { type: 'agentEnd' }
+  | { type: 'turnStart' }
   | { type: 'textDelta'; messageId: string; delta: string }
   | { type: 'thinkingDelta'; messageId: string; blockIndex: number; delta: string }
   | { type: 'thinkingEnd'; messageId: string; blockIndex: number; content: string }
@@ -60,7 +64,7 @@ export type WebviewOutMessage =
   | { type: 'toolUpdate'; toolCallId: string; output: string }
   | { type: 'toolEnd'; messageId: string; toolCallId: string; toolName: string; isError: boolean; output?: string }
   | { type: 'toolDiff'; toolCallId: string; diff: string; filePath: string; fileContent?: string }
-  | { type: 'userMessage'; text: string; images?: PromptImage[]; files?: string[]; queued?: boolean; submissionId?: string }
+  | { type: 'userMessage'; text: string; images?: PromptImage[]; files?: string[]; queued?: boolean; queueBehavior?: 'steer' | 'followUp'; submissionId?: string }
   | { type: 'fileResults'; query: string; results: { label: string; path: string }[] }
   | { type: 'setInputText'; text: string; append?: boolean }
   | { type: 'editRecorded'; filePath: string; editId: string; diff: string }

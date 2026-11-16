@@ -109,6 +109,13 @@ export async function createProvider(historyLoaded = true, editManager?: Instanc
     getMessages: mock(async (): Promise<any[]> => []), isRunning: true,
     start: mock((_path?: string) => {}), stop: mock(async () => {}),
     getModels: mock(async (): Promise<any[]> => []), setModel: mock(async (_provider: string, _modelId: string) => true),
+    abort: mock(async () => {}),
+    clearQueue: mock(async () => ({ steering: [], followUp: [] })),
+    getAvailableThinkingLevels: mock(async (): Promise<any[]> => []),
+    setSessionName: mock(async (_name: string) => true),
+    compact: mock(async () => true),
+    exportHtml: mock(async () => null),
+    steer: mock(async () => true), setThinkingLevel: mock(async (_level: string) => true),
   });
   const edits = editManager ?? {
     onDidChange: () => new Disposable(), recordEdit: mock(async (_path: string, _content: string) => ({ diff: 'computed patch' })),
@@ -117,7 +124,7 @@ export async function createProvider(historyLoaded = true, editManager?: Instanc
   };
   const messages: any[] = [];
   const workspaceState = { get: mock((_key: string): any => undefined), update: mock(async (_key: string, _value: any) => {}) };
-  const provider = new ChatSidebarProvider(parseUri('file:///extension'), '0.0.0-test', pi as unknown as PiRpcClient,
+  const provider = new ChatSidebarProvider(parseUri('file:///extension'), pi as unknown as PiRpcClient,
     edits as InstanceType<typeof EditManager>, workspaceState as unknown as vscode.Memento,
     { command: 'pi', cwd: '/workspace', env: { PI_CODING_AGENT_DIR: '/__pi-chat-test-agent__' } });
   const view = createView(messages);

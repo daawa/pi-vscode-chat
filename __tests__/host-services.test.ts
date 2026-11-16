@@ -159,9 +159,9 @@ describe('host resource ownership', () => {
 });
 
 describe('source/configuration contracts', () => {
-  test('sidebar HTML renders the extension version in the footer', async () => {
+  test('sidebar HTML leaves the extension version to the native status bar', async () => {
     const { view } = await createProvider();
-    expect(view.webview.html).toContain('<span id="extension-version" class="footer-version" title="pi-vscode-chat version">v0.0.0-test</span>');
+    expect(view.webview.html).not.toContain('extension-version');
   });
 
   test('source filenames use kebab-case', () => {

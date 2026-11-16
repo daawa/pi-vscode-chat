@@ -3,7 +3,7 @@ import { RpcTransport, type TransportOptions } from './rpc/transport.ts';
 import { isRecord } from './value-guards.ts';
 import type {
   RpcCommand, RpcResponse, RpcEvent, PiCommandInfo, SessionStats, RpcState,
-  ModelInfo, AgentMessage, SessionChangeResult, ThinkingLevel,
+  ModelInfo, AgentMessage, SessionChangeResult, ThinkingLevel, RpcImage,
 } from './rpc-types.ts';
 import type { PromptImage } from './webview-types.ts';
 
@@ -44,14 +44,14 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
     this.launchArgs = undefined;
     await this.transport.stop();
   }
-  async send(command: RpcCommand): Promise<RpcResponse> {
+  async send(command: RpcCommand, timeoutMs?: number): Promise<RpcResponse> {
     // A child that exited or was never started is replaced with its last launch
     // arguments, so a rebuilt pi binary is picked up without a window reload.
     if (!this.transport.isRunning) {
       if (!this.launchArgs) throw new Error('pi not running');
       this.transport.start(this.launchArgs);
     }
-    return this.transport.request(command);
+    return this.transport.request(command, timeoutMs);
   }
 
   dispose(): void {
@@ -65,20 +65,53 @@ export class PiRpcClient extends EventEmitter<ClientEvents> {
 
   prompt(text: string, images?: PromptImage[], streamingBehavior?: 'steer' | 'followUp'): Promise<RpcResponse> {
     return this.send({
-      type: 'prompt', message: text,
-      ...(images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {}),
+      type: 'prompt', message: text, ...rpcImages(images),
       ...(streamingBehavior ? { streamingBehavior } : {}),
     });
   }
 
   async steer(text: string, images?: PromptImage[]): Promise<boolean> {
-    const response = await this.send({ type: 'steer', message: text,
-      ...(images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {}),
-    });
+    const response = await this.send({ type: 'steer', message: text, ...rpcImages(images) });
     return response.success;
   }
 
   async abort(): Promise<void> { await this.send({ type: 'abort' }); }
+
+  /** Remove queued steering/follow-up messages and return their text. */
+  async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    const data = responseData(await this.send({ type: 'clear_queue' }));
+    return { steering: stringList(data?.steering), followUp: stringList(data?.followUp) };
+  }
+
+  /** Thinking levels supported by the current model; ["off"] for non-reasoning models.
+   * Returns null when the command fails or is unsupported (older pi), so callers can
+   * distinguish "unavailable" from a real (empty) list and retry later. Unknown level
+   * names are passed through for forward compatibility. */
+  async getAvailableThinkingLevels(): Promise<string[] | null> {
+    const response = await this.send({ type: 'get_available_thinking_levels' });
+    const data = responseData(response);
+    if (!response.success || !Array.isArray(data?.levels)) return null;
+    return data.levels.filter((level): level is string => typeof level === 'string' && level.length > 0);
+  }
+
+  /** Set a display name for the current session. */
+  async setSessionName(name: string): Promise<boolean> {
+    return (await this.send({ type: 'set_session_name', name })).success;
+  }
+
+  /** Manually compact conversation context. False when compaction failed or was aborted.
+   * Compaction summarizes the whole context with an LLM call, so it gets a longer timeout
+   * than regular commands; progress streams via compaction_start/end events. */
+  async compact(customInstructions?: string): Promise<boolean> {
+    return (await this.send({ type: 'compact', ...(customInstructions ? { customInstructions } : {}) }, 600_000)).success;
+  }
+
+  /** Export the session as HTML; returns the written path. */
+  async exportHtml(outputPath?: string): Promise<string | null> {
+    const data = responseData(await this.send({ type: 'export_html', ...(outputPath ? { outputPath } : {}) }));
+    return typeof data?.path === 'string' ? data.path : null;
+  }
+
 
   async getModels(): Promise<ModelInfo[]> {
     const data = responseData(await this.send({ type: 'get_available_models' }));
@@ -150,4 +183,10 @@ function sessionChangeResult(response: RpcResponse): SessionChangeResult {
 function isModelInfo(value: unknown): value is ModelInfo {
   return isRecord(value) && typeof value.id === 'string' && typeof value.provider === 'string'
     && Array.isArray(value.input) && value.input.every(input => input === 'text' || input === 'image');
+}
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+function rpcImages(images?: PromptImage[]): { images?: RpcImage[] } {
+  return images?.length ? { images: images.map(({ data, mime }) => ({ type: 'image' as const, data, mimeType: mime })) } : {};
 }

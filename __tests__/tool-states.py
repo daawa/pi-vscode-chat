@@ -303,7 +303,7 @@ try:
     print('14 session/tool-state regression tests passed')
 
     module_results = run_suite('webview-modules.js')
-    assert len(module_results) == 8, module_results
+    assert len(module_results) == 20, module_results
     for name in module_results:
         print('PASS:', name)
 
@@ -404,6 +404,6 @@ try:
         print('PASS: Saved style is restored in a fresh webview')
     finally:
         cdp('Target.closeTarget', targetId=restored_target)
-    print('41 webview regression tests passed')
+    print('53 webview regression tests passed')
 finally:
     cdp('Target.closeTarget', targetId=target)

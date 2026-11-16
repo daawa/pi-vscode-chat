@@ -11,6 +11,14 @@ export class EventBridge implements vscode.Disposable {
   private toolCalls = new Map<string, { args: ToolArgs; snapshot?: Promise<unknown> }>();
   private disposed = false;
   private epoch = 0;
+  /** True once pi has emitted agent_settled: current protocol, rely on it exclusively. */
+  private settledSeen = false;
+  /** True while the UI shows an unsettled run; guards against double agentEnd. */
+  private runSettled = true;
+  /** Fallback settle timer for pi builds that never emit agent_settled. */
+  private settleTimer?: ReturnType<typeof setTimeout>;
+  /** Coalesces bursty state-refresh events into one RPC round trip. */
+  private refreshTimer?: ReturnType<typeof setTimeout>;
   private readonly editSubscription: vscode.Disposable;
   private readonly onEvent = (event: RpcEvent) => { void this.handle(event).catch(this.onError); };
   private readonly onError = (error: unknown) => {
@@ -35,10 +43,21 @@ export class EventBridge implements vscode.Disposable {
     this.editSubscription = edits.onDidChange(record => this.onEditChanged(record));
   }
 
-  reset(): void { this.epoch++; this.toolCalls.clear(); }
+  reset(): void {
+    this.epoch++;
+    this.toolCalls.clear();
+    this.clearSettleTimer();
+    this.runSettled = true;
+    // A respawned pi child may be a different build; re-probe for agent_settled.
+    this.settledSeen = false;
+    // Defensive: every reset path (exit, session change, dispose) must return the UI
+    // to idle. Callers also refresh state themselves; the guard here is idempotent.
+    this.session.setStreaming(false);
+  }
   dispose(): void {
     this.disposed = true;
     this.reset();
+    this.clearRefreshTimer();
     this.pi.off('event', this.onEvent);
     this.pi.off('exit', this.onExit);
     this.pi.off('transportError', this.onError);
@@ -49,15 +68,32 @@ export class EventBridge implements vscode.Disposable {
     if (this.disposed) return;
     switch (event.type) {
       case 'agent_start':
+        this.clearSettleTimer();
+        this.runSettled = false;
         this.session.setStreaming(true);
         this.postMessage({ type: 'agentStart' });
         this.edits.snapshotWorkspace().catch(() => {});
         break;
 
       case 'agent_end':
-        this.session.setStreaming(false);
-        this.postMessage({ type: 'agentEnd' });
-        void this.session.sendStats();
+        // agent_end closes one low-level run, but retries, overflow recovery,
+        // compaction, or queued steering/follow-up can start another. agent_settled
+        // is the definitive idle marker; the fallback grace below covers pi builds
+        // or failure paths where it never arrives.
+        if (event.willRetry) break; // an automatic retry follows immediately
+        this.scheduleSettle();
+        break;
+
+      case 'agent_settled':
+        this.settledSeen = true;
+        this.clearSettleTimer();
+        this.settleRun();
+        break;
+
+      case 'turn_start':
+        // Turn boundaries let the webview split the assistant bubble when a steer
+        // was interleaved, so the steered reply renders below the user message.
+        this.postMessage({ type: 'turnStart' });
         break;
 
       case 'message_update':
@@ -88,6 +124,7 @@ export class EventBridge implements vscode.Disposable {
         break;
 
       case 'auto_retry_start':
+        this.clearSettleTimer(); // more work is coming; keep the UI streaming
         this.postMessage({
           type: 'retryStatus',
           text: `Transient error — retrying (${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s…`,
@@ -101,13 +138,35 @@ export class EventBridge implements vscode.Disposable {
         }
         break;
 
+      case 'summarization_retry_scheduled':
+        this.postMessage({
+          type: 'retryStatus',
+          text: `Summarization failed — retrying (${event.attempt}/${event.maxAttempts}) in ${Math.round(event.delayMs / 1000)}s…`,
+        });
+        break;
+
+      case 'summarization_retry_finished':
+        this.postMessage({ type: 'retryStatus', text: null });
+        break;
+
       case 'compaction_start':
+        this.clearSettleTimer(); // compaction continues the session-level run
         this.postMessage({ type: 'compactionStatus', text: 'Compacting conversation context…' });
         break;
 
       case 'compaction_end':
         this.postMessage({ type: 'compactionStatus', text: null });
+        if (!event.aborted && event.errorMessage) {
+          this.postMessage({ type: 'error', message: `Compaction failed: ${event.errorMessage}` });
+        }
         void this.session.sendStats();
+        break;
+
+      case 'thinking_level_changed':
+      case 'session_info_changed':
+      case 'entry_appended':
+        // Bursty metadata events coalesce into a single state+stats refresh.
+        this.scheduleRefresh();
         break;
 
       case 'extension_ui_request':
@@ -118,6 +177,52 @@ export class EventBridge implements vscode.Disposable {
         this.postMessage({ type: 'error', message: event.error || 'Extension error' });
         break;
     }
+  }
+
+  private settleRun(): void {
+    if (this.runSettled) return;
+    this.runSettled = true;
+    this.session.setStreaming(false);
+    this.postMessage({ type: 'agentEnd' });
+    void this.session.sendStats();
+  }
+
+  private scheduleSettle(): void {
+    if (this.settleTimer || this.disposed) return;
+    // Before pi proves it emits agent_settled, settle quickly (old-build fallback).
+    // Afterwards use a long grace: normal runs settle on agent_settled within
+    // milliseconds, so the timer only fires when settled truly never arrives
+    // (pi hang, crash without exit, protocol gap) — recovering the UI instead of
+    // locking the composer forever.
+    const delay = this.settledSeen ? 15_000 : 250;
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = undefined;
+      this.settleRun();
+    }, delay);
+    this.settleTimer.unref?.();
+  }
+
+  private clearSettleTimer(): void {
+    if (!this.settleTimer) return;
+    clearTimeout(this.settleTimer);
+    this.settleTimer = undefined;
+  }
+
+  private scheduleRefresh(): void {
+    if (this.refreshTimer || this.disposed) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      if (this.disposed) return;
+      void this.session.sendState();
+      void this.session.sendStats();
+    }, 100);
+    this.refreshTimer.unref?.();
+  }
+
+  private clearRefreshTimer(): void {
+    if (!this.refreshTimer) return;
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
   }
 
   private handleMessageUpdate(event: MessageUpdateEvent): void {
@@ -137,11 +242,12 @@ export class EventBridge implements vscode.Disposable {
         });
         break;
       case 'thinking_end':
+        // Current pi names the authoritative field "content"; older pi sent "thinking".
         this.postMessage({
           type: 'thinkingEnd',
           messageId: 'current',
           blockIndex: msgEvent.contentIndex ?? 0,
-          content: msgEvent.thinking,
+          content: msgEvent.content ?? msgEvent.thinking,
         });
         break;
     }

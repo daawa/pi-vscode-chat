@@ -123,6 +123,215 @@
     assert(document.getElementById('sessions-panel').classList.contains('hidden'), 'Session picker did not close');
   });
 
+  test('thinking cycles within the levels the current model supports', () => {
+    send({ type: 'init', state: 'idle', model: 'provider/model', modelReasoning: true, thinkingLevel: 'low', thinkingLevels: ['off', 'low', 'high'] });
+    document.getElementById('btn-thinking').click();
+    assert(testPostedMessages.at(-1).level === 'high', 'Thinking did not cycle within supported levels');
+    document.getElementById('btn-thinking').click();
+    assert(testPostedMessages.at(-1).level === 'off', 'Thinking did not wrap around the supported list');
+    send({ type: 'init', state: 'idle', model: 'other/model', modelReasoning: true, thinkingLevel: 'minimal' });
+    document.getElementById('btn-thinking').click();
+    assert(testPostedMessages.at(-1).level === 'low', 'Thinking did not fall back to the default list when levels are absent');
+  });
+
+  test('follow-up button is streaming-only and queues the draft after the current run', () => {
+    const followupBtn = document.getElementById('btn-followup');
+    type('then summarize');
+    assert(followupBtn.classList.contains('hidden'), 'Follow-up button visible while idle');
+    send({ type: 'init', state: 'streaming', model: 'provider/model' });
+    assert(!followupBtn.classList.contains('hidden'), 'Follow-up button hidden while streaming with a draft');
+    followupBtn.click();
+    const prompt = testPostedMessages.at(-1);
+    assert(prompt.type === 'prompt' && prompt.behavior === 'followUp' && prompt.streaming === true, 'Follow-up draft not queued');
+    send({ type: 'sessionCleared' });
+    send({ type: 'init', state: 'streaming', model: 'provider/model' });
+    assert(followupBtn.classList.contains('hidden'), 'Follow-up button visible without a draft');
+    // Enter still steers by default while streaming.
+    type('change direction');
+    key('Enter');
+    const steer = testPostedMessages.at(-1);
+    assert(steer.type === 'prompt' && steer.streaming === true && steer.behavior === undefined, 'Enter stopped steering by default');
+  });
+
+  test('queue bar clear button routes to the host and hides with an empty queue', () => {
+    send({ type: 'queueUpdate', steering: ['First'], followUp: ['Later'] });
+    const clearBtn = document.querySelector('.queue-clear');
+    assert(clearBtn, 'Queue clear button missing');
+    clearBtn.click();
+    assert(testPostedMessages.at(-1).type === 'clearQueue', 'Clear queue not routed');
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide when emptied');
+  });
+
+  test('queued bubbles confirm, settle by count, survive transformed text, and clear', () => {
+    send({ type: 'userMessage', text: 'steer it', queued: true, submissionId: 'q1' });
+    send({ type: 'userMessage', text: 'later', queued: true, submissionId: 'q2', queueBehavior: 'followUp' });
+    const queued = () => document.querySelectorAll('.message.user.queued');
+    assert(queued().length === 2, 'Queued bubbles missing');
+    // A queue_update that predates acknowledgment must not settle the new bubbles
+    // (the steer-ahead-of-consumption race).
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    assert(queued().length === 2, 'Unacknowledged bubbles settled early');
+    // Acknowledge both as queued; the queue still holds both.
+    send({ type: 'promptResult', submissionId: 'q1', success: true, queued: true });
+    send({ type: 'promptResult', submissionId: 'q2', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: ['steer it'], followUp: ['later'] });
+    assert(queued().length === 2, 'Still-pending bubbles settled early');
+    // One consumed: count-based reconciliation settles the older bubble only.
+    send({ type: 'queueUpdate', steering: [], followUp: ['later'] });
+    const settled = document.querySelector('[data-submission-id="q1"]');
+    assert(settled && !settled.classList.contains('queued') && !settled.querySelector('.queued-tag'), 'Consumed steer bubble not settled');
+    assert(queued().length === 1, 'Pending follow-up bubble settled wrongly');
+    // Transformed queue text (expanded skill/template) must not break reconciliation.
+    send({ type: 'userMessage', text: '/review', queued: true, submissionId: 'q3' });
+    send({ type: 'promptResult', submissionId: 'q3', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: ['EXPANDED SKILL CONTENT'], followUp: ['later'] });
+    assert(queued().length === 2, 'Transformed queue text broke count-based settling');
+    // clear_queue removes every confirmed queued bubble, whatever text pi stored.
+    send({ type: 'queueCleared', steering: ['EXPANDED SKILL CONTENT'], followUp: ['later'] });
+    assert(!document.querySelector('.message.user.queued'), 'Cleared bubbles survived');
+    assert(document.getElementById('queue-bar').classList.contains('hidden'), 'Queue bar did not hide after clear');
+  });
+
+  test('clear response removes only returned entries before buffered consumption is reconciled', () => {
+    for (const id of ['consumed', 'cleared']) {
+      send({ type: 'userMessage', text: id, queued: true, submissionId: id, queueBehavior: 'followUp' });
+      send({ type: 'promptResult', submissionId: id, success: true, queued: true });
+    }
+    // Host buffers pi's empty queue_update until after this response. Only the
+    // newest entry was cleared; the older one was consumed just before clearing.
+    send({ type: 'queueCleared', steering: [], followUp: ['expanded cleared text'] });
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    assert(!document.querySelector('[data-submission-id="cleared"]'), 'Cleared entry survived');
+    const consumed = document.querySelector('[data-submission-id="consumed"]');
+    assert(consumed && !consumed.classList.contains('queued'), 'Consumed entry was removed instead of settled');
+  });
+
+  test('an early follow-up stays below current tools and text, above its own reply', () => {
+    send({ type: 'userMessage', text: 'current task' });
+    send({ type: 'agentStart' });
+    send({ type: 'userMessage', text: 'fjdsk', queued: true, submissionId: 'early-follow', queueBehavior: 'followUp' });
+    send({ type: 'promptResult', submissionId: 'early-follow', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: [], followUp: ['fjdsk'] });
+    send({ type: 'toolStart', messageId: 'current', toolCallId: 'before-follow', toolName: 'read', args: '{}' });
+    send({ type: 'toolEnd', toolCallId: 'before-follow', isError: false, output: 'ok' });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Current task finished.' });
+    const follow = document.querySelector('[data-submission-id="early-follow"]');
+    const current = document.querySelector('.message.assistant');
+    assert(current.nextElementSibling === follow, 'Early follow-up appeared above the current assistant reply');
+    assert(current.querySelector('#tool-before-follow'), 'Current tool was misplaced');
+    assert(follow.classList.contains('queued'), 'Follow-up settled before consumption');
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Follow-up answer.' });
+    send({ type: 'agentEnd' });
+    assert(current.textContent.includes('Current task finished.'), 'Current reply lost');
+    assert(follow.previousElementSibling === current, 'Consumed follow-up moved above current reply');
+    assert(follow.nextElementSibling?.textContent.includes('Follow-up answer.'), 'Follow-up answer is not below its prompt');
+    assert(!current.textContent.includes('Follow-up answer.'), 'Follow-up answer merged into the current reply');
+  });
+
+  test('a later steer overtakes a follow-up without settling it or misordering replies', () => {
+    send({ type: 'agentStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Working.' });
+    send({ type: 'userMessage', text: 'later task', queued: true, submissionId: 'later-task', queueBehavior: 'followUp' });
+    send({ type: 'promptResult', submissionId: 'later-task', success: true, queued: true });
+    send({ type: 'userMessage', text: 'change direction', queued: true, submissionId: 'priority-steer', queueBehavior: 'steer' });
+    send({ type: 'promptResult', submissionId: 'priority-steer', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: ['expanded steer'], followUp: ['expanded follow-up'] });
+    send({ type: 'queueUpdate', steering: [], followUp: ['expanded follow-up'] });
+    const follow = document.querySelector('[data-submission-id="later-task"]');
+    const steer = document.querySelector('[data-submission-id="priority-steer"]');
+    assert(follow.classList.contains('queued'), 'Steer consumption incorrectly settled the older follow-up');
+    assert(!steer.classList.contains('queued'), 'Consumed steer stayed pending');
+    assert(steer.nextElementSibling === follow, 'Delivered steer did not overtake the follow-up');
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Changed direction.' });
+    send({ type: 'agentEnd' });
+    assert(steer.nextElementSibling?.textContent.includes('Changed direction.'), 'Steered answer is misplaced');
+    assert(follow.previousElementSibling === steer.nextElementSibling, 'Follow-up did not remain below the active reply');
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'agentStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'Later task answer.' });
+    send({ type: 'agentEnd' });
+    assert(follow.nextElementSibling?.textContent.includes('Later task answer.'), 'Next-run follow-up reply is misplaced');
+  });
+
+  test('follow-ups remain FIFO when consumed one at a time', () => {
+    send({ type: 'agentStart' });
+    for (const id of ['follow-1', 'follow-2']) {
+      send({ type: 'userMessage', text: id, queued: true, submissionId: id, queueBehavior: 'followUp' });
+      send({ type: 'promptResult', submissionId: id, success: true, queued: true });
+    }
+    send({ type: 'textDelta', messageId: 'current', delta: 'Original reply.' });
+    send({ type: 'queueUpdate', steering: [], followUp: ['follow-2'] });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'First follow-up reply.' });
+    send({ type: 'agentEnd' });
+    const first = document.querySelector('[data-submission-id="follow-1"]');
+    const second = document.querySelector('[data-submission-id="follow-2"]');
+    assert(!first.classList.contains('queued') && second.classList.contains('queued'), 'Wrong follow-up consumed');
+    assert(first.previousElementSibling?.textContent.includes('Original reply.'), 'Original reply is misplaced');
+    assert(first.nextElementSibling?.textContent.includes('First follow-up reply.'), 'First follow-up reply is misplaced');
+    assert(second.previousElementSibling === first.nextElementSibling, 'Second follow-up is ahead of the first reply');
+  });
+
+  test('a handled prompt drops its optimistic bubble and keeps the draft editable', () => {
+    type('steer this');
+    button.click();
+    const prompt = testPostedMessages.at(-1);
+    assert(prompt.type === 'prompt', 'Prompt not sent');
+    send({ type: 'userMessage', text: 'steer this', queued: true, submissionId: prompt.submissionId });
+    send({ type: 'promptHandled', submissionId: prompt.submissionId });
+    assert(!document.querySelector('.message.user.queued'), 'Handled bubble survived');
+    assert(input.value === 'steer this', 'Draft lost after handled prompt');
+    assert(!button.disabled, 'Composer stayed locked after handled prompt');
+  });
+
+  test('a steer between turns starts a new assistant bubble below the delivered message', () => {
+    send({ type: 'agentStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'First turn answer.' });
+    send({ type: 'userMessage', text: 'say BANANA instead', queued: true, submissionId: 's1' });
+    // Still queued: a tool-loop turn must NOT split below it (message not delivered yet).
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: ' (tool loop continues)' });
+    send({ type: 'agentEnd' }); // flush renders
+    assert(document.querySelectorAll('.message.assistant').length === 1, 'Queued (undelivered) bubble split the assistant message');
+    // Delivered: acknowledged and consumed → settled → the next turn splits below it.
+    send({ type: 'promptResult', submissionId: 's1', success: true, queued: true });
+    send({ type: 'queueUpdate', steering: [], followUp: [] });
+    send({ type: 'turnStart' });
+    send({ type: 'textDelta', messageId: 'current', delta: 'BANANA' });
+    send({ type: 'agentEnd' });
+    const bubbles = document.querySelectorAll('.message.assistant');
+    assert(bubbles.length === 2, 'Steered reply continued in the old bubble');
+    assert(bubbles[1].textContent.includes('BANANA'), 'New bubble missing the steered reply');
+    assert(!bubbles[0].textContent.includes('BANANA'), 'Old bubble contaminated by the steered reply');
+    const order = Array.from(document.querySelectorAll('.message')).map(el => el.className);
+    assert(order[0].includes('assistant') && order[1].includes('user') && order[2].includes('assistant'),
+      `Conversation order wrong: ${order.join(' | ')}`);
+  });
+
+  test('host draft edits sent during acknowledgment are buffered, not dropped', () => {
+    type('steer this');
+    button.click(); // submission pending: composer locked awaiting promptResult
+    const submissionId = testPostedMessages.find(m => m.type === 'prompt').submissionId;
+    send({ type: 'setInputText', text: 'restored queue draft', append: true });
+    assert(input.value === 'steer this', 'Buffered text leaked into the locked draft');
+    send({ type: 'promptResult', submissionId, success: true, queued: true });
+    // Draft was cleared on success, then the buffered restore is applied.
+    assert(input.value === 'restored queue draft', `Buffered restore lost: ${JSON.stringify(input.value)}`);
+  });
+
+  test('a prompt that started a run (stale streaming flag) settles its bubble at once', () => {
+    send({ type: 'userMessage', text: 'queued-looking follow-up', queued: true, submissionId: 'f1' });
+    assert(document.querySelector('.message.user.queued'), 'Queued bubble missing');
+    send({ type: 'promptResult', submissionId: 'f1', success: true, queued: false });
+    const el = document.querySelector('[data-submission-id="f1"]');
+    assert(el && !el.classList.contains('queued') && !el.querySelector('.queued-tag'), 'Started prompt left its bubble queued');
+  });
+
   test('plain file references flow from attachment controller into the submitted prompt', () => {
     document.getElementById('btn-attach').click();
     const requestId = testPostedMessages.at(-1).requestId;

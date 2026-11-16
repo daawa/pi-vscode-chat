@@ -4,6 +4,7 @@ import type { EditManager } from '../edit-manager.ts';
 import type { EditRecord } from '../edit-types.ts';
 import type { PostMessage, PromptImage } from '../webview-types.ts';
 import { validatePromptImages } from '../image-attachments.ts';
+import { responseDisposition } from '../rpc-types.ts';
 import { LAST_SESSION_FILE_STATE_KEY } from '../configuration.ts';
 
 /** Owns all prompt/history/session guards; no lifecycle flags live in the view. */
@@ -18,6 +19,8 @@ export class SessionController implements vscode.Disposable {
   private transition?: Promise<void>;
   private disposed = false;
   private epoch = 0;
+  private thinkingLevels: string[] | null = null;
+  private thinkingLevelsModel: string | null = null;
 
   constructor(
     private readonly pi: PiRpcClient,
@@ -28,6 +31,7 @@ export class SessionController implements vscode.Disposable {
     private readonly onEditChanged: (record: EditRecord) => void,
   ) {}
 
+  get generation(): number { return this.epoch; }
   get loading(): boolean { return this.historyLoading; }
   get submitting(): boolean { return this.promptPending; }
 
@@ -122,7 +126,7 @@ export class SessionController implements vscode.Disposable {
     } finally { this.promptPending = false; }
   }
 
-  async submit(text: string, images?: PromptImage[], streaming?: boolean, submissionId?: string): Promise<void> {
+  async submit(text: string, images?: PromptImage[], streaming?: boolean, submissionId?: string, behavior: 'steer' | 'followUp' = 'steer'): Promise<void> {
     if (this.rejectWhileBusy(submissionId)) return;
     this.promptPending = true;
     let started = false;
@@ -144,19 +148,46 @@ export class SessionController implements vscode.Disposable {
         }
       }
       if (this.disposed) return;
+      // The webview's streaming flag can be stale; the controller's event-driven
+      // view is authoritative. An explicit followUp request keeps its behavior
+      // even if the flags disagree, so the draft is never silently downgraded.
+      const streamingNow = streaming || this.isStreaming;
+      const wantsFollowUp = behavior === 'followUp' && (!isCommand || !!images?.length);
+      const queued = (!!streamingNow || wantsFollowUp) && !isCommand;
       // Echo before streamed output, but remove this bubble if Pi rejects preflight.
-      this.postMessage({ type: 'userMessage', text, images, queued: !!streaming && !isCommand, submissionId });
-      if (!streaming && !isCommand) {
+      this.postMessage({ type: 'userMessage', text, images, queued, queueBehavior: queued ? (wantsFollowUp ? 'followUp' : 'steer') : undefined, submissionId });
+      if (!streamingNow && !isCommand) {
         started = true;
         this.setStreaming(true);
         await this.edits.snapshotWorkspace();
       }
       if (this.disposed) return;
-      const behavior = streaming && (!isCommand || !!images?.length) ? 'steer' : undefined;
-      const result = await this.pi.prompt(text, images, behavior);
+      const result = await this.pi.prompt(
+        text, images,
+        wantsFollowUp ? 'followUp' : streamingNow && (!isCommand || !!images?.length) ? 'steer' : undefined,
+      );
       if (this.disposed) return;
       if (!result.success) throw new Error(result.error || 'Failed to send prompt to pi');
-      if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true });
+      const disposition = responseDisposition(result);
+      if (disposition === 'handled' && queued && submissionId) {
+        // An extension/input handler consumed the prompt: no run, no queue entry.
+        // Drop the optimistic queued bubble and keep the draft for re-editing.
+        this.postMessage({ type: 'promptHandled', submissionId });
+      } else {
+        // queued:true tells the webview the prompt really entered pi's queue, so its
+        // bubble can be reconciled later; anything else settles the bubble at once.
+        if (submissionId) this.postMessage({ type: 'promptResult', submissionId, success: true, queued: disposition === 'queued' });
+        // "handled" for an idle prompt or command: no agent run starts, so no
+        // agent_end or agent_settled will ever arrive for it. init(idle) unlocks
+        // the composer; the handler may have done session-visible work.
+        if (disposition === 'handled') {
+          if (started) {
+            started = false;
+            this.setStreaming(false);
+          }
+          void this.sendStats();
+        }
+      }
       if (isCommand) await this.sendState();
     } catch (err) {
       if (this.disposed) return;
@@ -183,12 +214,33 @@ export class SessionController implements vscode.Disposable {
     if (state?.sessionFile) {
       void Promise.resolve(this.workspaceState.update(LAST_SESSION_FILE_STATE_KEY, state.sessionFile)).catch(console.warn);
     }
+    // Thinking levels are model-scoped; refetch only when the model changes.
+    // The cache key is committed only after a completed fetch, so a failed or
+    // superseded request is retried on the next refresh instead of being lost.
+    const modelKey = state?.model ? `${state.model.provider}/${state.model.id}` : null;
+    if (modelKey !== this.thinkingLevelsModel) {
+      // null from the client means the command failed or is unsupported (older pi);
+      // don't commit, so the next refresh retries instead of falling back forever.
+      let levels: string[] | null = modelKey ? null : [];
+      if (modelKey) {
+        try { levels = await this.pi.getAvailableThinkingLevels(); } catch { levels = null; }
+      }
+      if (this.disposed || requestId !== this.stateRequestId) return;
+      if (levels !== null) {
+        this.thinkingLevelsModel = modelKey;
+        this.thinkingLevels = levels;
+      }
+    }
+    // Only send levels proven to belong to the current model; otherwise the
+    // webview falls back to its default list.
+    const currentLevels = this.thinkingLevelsModel === modelKey ? this.thinkingLevels : null;
     this.postMessage({
       type: 'init',
       model: state?.model ? `${state.model.provider}/${state.model.id}` : 'unknown',
       modelReasoning: !!state?.model?.reasoning,
       modelSupportsImages: !!state?.model?.input?.includes('image'),
       thinkingLevel: state?.thinkingLevel || 'off',
+      ...(currentLevels?.length ? { thinkingLevels: currentLevels } : {}),
       state: this.isStreaming || state?.isStreaming ? 'streaming' : 'idle',
       sessionName: state?.sessionName,
       sessionId: state?.sessionId,

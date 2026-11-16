@@ -18,7 +18,11 @@ export function createShell(vscode) {
   const btnModel = $('btn-model');
   const btnThinking = $('btn-thinking');
   const thinkingLevelEl = $('thinking-level');
-  const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+  // Conservative fallback when the model-scoped list is unavailable (older pi, failed
+  // fetch): common levels only. A current level outside the list is dynamically
+  // included so cycling never "resets" an unlisted level.
+  const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high'];
+  let thinkingLevels = THINKING_LEVELS;
   function applyStyle(style) {
     // Only use bundled stylesheet URLs supplied by the extension host.
     state.style = style === 'default' ? 'default' : 'custom';
@@ -81,6 +85,9 @@ export function createShell(vscode) {
     }
     btnThinking.classList.toggle('hidden', !msg.modelReasoning);
     thinkingLevelEl.textContent = msg.thinkingLevel || 'off';
+    // Cycle only levels the current model actually supports (get_available_thinking_levels).
+    if (Array.isArray(msg.thinkingLevels) && msg.thinkingLevels.length) thinkingLevels = msg.thinkingLevels;
+    else if (msg.thinkingLevels === undefined) thinkingLevels = THINKING_LEVELS;
   }
 
   btnNew.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
@@ -96,7 +103,8 @@ export function createShell(vscode) {
   btnModel.addEventListener('click', () => vscode.postMessage({ type: 'selectModel' }));
   btnThinking.addEventListener('click', () => {
     const cur = thinkingLevelEl.textContent;
-    const next = THINKING_LEVELS[(THINKING_LEVELS.indexOf(cur) + 1) % THINKING_LEVELS.length];
+    const list = cur && !thinkingLevels.includes(cur) ? [cur, ...thinkingLevels] : thinkingLevels;
+    const next = list[(list.indexOf(cur) + 1) % list.length];
     thinkingLevelEl.textContent = next;
     vscode.postMessage({ type: 'setThinkingLevel', level: next });
   });

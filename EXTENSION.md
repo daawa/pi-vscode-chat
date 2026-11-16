@@ -86,7 +86,10 @@ Missing items appear in a QuickPick with an **Install All** button at top.
 | `Pi: Select Model` | — | Pick model/providers |
 | `Pi: Accept Edit` | — | Keep a pending edit |
 | `Pi: Reject Edit` | — | Revert a pending edit |
-| `Pi: Abort Current Task` | — | Stop streaming agent |
+| `Pi: Abort Current Task` | — | Stop streaming agent (queued drafts return to the composer) |
+| `Pi: Compact Conversation` | — | Manually compact context |
+| `Pi: Rename Session` | — | Set a session display name |
+| `Pi: Export Session as HTML` | — | Export session to HTML |
 | `Pi Chat: Ask About Selection` | — | Send selected code to chat |
 
 ## Settings

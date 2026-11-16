@@ -226,11 +226,21 @@ export function createPanels({ vscode, isLocked }) {
     queueBar.classList.remove('hidden');
     queueBar.innerHTML = '';
     (steering || []).forEach(t => {
-      queueBar.appendChild(createElement('span', 'queue-chip steer', `↪ ${escapeHtml(t.slice(0, 60))}`));
+      const chip = createElement('span', 'queue-chip steer', `↪ Steer · ${escapeHtml(t.slice(0, 60))}`);
+      chip.title = `Steering — injects into the run in progress: ${t}`;
+      queueBar.appendChild(chip);
     });
     (followUp || []).forEach(t => {
-      queueBar.appendChild(createElement('span', 'queue-chip follow', `⏭ ${escapeHtml(t.slice(0, 60))}`));
+      const chip = createElement('span', 'queue-chip follow', `⏭ After run · ${escapeHtml(t.slice(0, 60))}`);
+      chip.title = `Follow-up — runs after the current run finishes: ${t}`;
+      queueBar.appendChild(chip);
     });
+    const clearBtn = createElement('button', 'queue-clear', '✕');
+    clearBtn.type = 'button';
+    clearBtn.title = 'Clear queued messages';
+    clearBtn.setAttribute('aria-label', 'Clear queued messages');
+    clearBtn.addEventListener('click', () => vscode.postMessage({ type: 'clearQueue' }));
+    queueBar.appendChild(clearBtn);
   }
 
   // ── Stats footer ──
